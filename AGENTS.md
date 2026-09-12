@@ -33,6 +33,7 @@
 ```
 VCPMobile/
 ├── src/                        # Vue 3 前端源码
+│   ├── AGENTS.md               # Vue 渲染层局部代码地图与交互边界
 │   ├── main.ts                 # 应用入口
 │   ├── App.vue                 # 根布局
 │   ├── core/                   # 基础设施
@@ -60,6 +61,7 @@ VCPMobile/
 │   └── assets/                 # 主题与静态资源
 ├── src-tauri/                  # Tauri v2 + Rust 后端
 │   ├── src/
+│   │   ├── AGENTS.md           # Rust 核心与 Tauri IPC 局部代码地图
 │   │   ├── main.rs             # host 开发/测试 scaffold（非产品入口）
 │   │   ├── lib.rs              # 启动流程与生命周期编排
 │   │   ├── commands.rs         # IPC 命令注册表 + 防爆栈总闸（macro_rules!，在 lib.rs 展开）
@@ -98,6 +100,8 @@ VCPMobile/
 └── tsconfig.json               # TypeScript 配置
 ```
 
+`AGENTS.md` 随物理目录形成作用域树。修改任何路径前，读取从仓库根到该路径最近节点的全部 `AGENTS.md`；若当前会话从仓库根启动、子节点未被自动注入，则先显式读取对应文件。一次任务涉及多个子树时合并相应节点，子节点只补充局部关系，不重复根规则。
+
 ### 2.1 文档体系三层结构
 
 `docs/` 不是杂乱的笔记集合，而是按主题严格分层的技术知识库：
@@ -124,8 +128,6 @@ VCPMobile/
 ---
 
 ## 3. 构建与开发命令
-
-所有命令均在 Windows PowerShell 5.1 环境下执行。项目使用 **pnpm** 作为包管理器。
 
 ```powershell
 # 完整静态检查（TypeScript + Rust）
@@ -177,135 +179,49 @@ pnpm android:debug:dev
 
 ---
 
-## 5. 测试策略
+## 5. 验证与测试边界
 
-本项目已建立覆盖 Rust 后端、Tauri 插件、Vue 前端、Android E2E 与性能稳定性的完整测试体系。全局架构约束文件见 `docs/Test_Architecture_Constraints.md`。测试代码与业务代码物理隔离，禁止以"方便测试"为由修改业务接口。
+测试代码是 Agent 编写的回归程序，不是产品事实或设计标准。当前行为只从生产代码恢复，目标行为由用户请求决定；某个断言失败只说明测试与当前代码或目标不一致，必须先追踪真实调用链，再决定修改生产代码、修正测试或删除过时测试。
 
-### 5.1 测试分层（L1-L8）
+- 禁止为了迎合既有测试修改业务接口、复制状态、保留失效路径或增加无消费方的兼容层。
+- 测试可以记录一次可复现输入和执行结果，但不能反向证明生产架构应当怎样设计。
+- 测试与 fixture 使用仓库内相对路径，不写本机绝对路径；不保留无断言、只输出日志的伪测试。
+- 验证范围服从当前改动。静态检查、编译、自动化测试、Android 构建和真机操作分别提供不同证据，交付时不得互相替代。
 
-| 层级 | 名称                  | 覆盖范围                                     | 触发频率        | 主要工具                           |
-| ---- | --------------------- | -------------------------------------------- | --------------- | ---------------------------------- |
-| L1   | Rust 内联单测         | 纯函数/算法/DTO/状态机                       | 每次 PR         | cargo test                         |
-| L2   | Rust 集成测试         | Tauri command + mock DB/FS/HTTP              | 每次 PR         | tauri::test, tempfile, wiremock    |
-| L3   | Android 插件 JVM 单测 | Kotlin 纯逻辑 / Robolectric Shadow           | 每次 PR         | JUnit 4, Robolectric, MockK        |
-| L4   | 前端组件/Store 测试   | Vue 原子组件, Pinia Store                    | 每次 PR         | Vitest, @vue/test-utils, happy-dom |
-| L5   | 契约测试              | Rust 命令↔TS 调用 / 权限声明 / Kotlin 方法名 | 每次 PR         | 文本/反射快照测试                  |
-| L6   | Android 仪器测试      | Service/Activity/权限生命周期                | nightly         | AndroidX Test                      |
-| L7   | Android E2E Smoke     | 真机关键旅程                                 | release 前      | Android Debug Agent + 人工触控     |
-| L8   | 性能/稳定性           | 启动/APK 体积/Criterion 基准/长稳 soak       | 手工按需        | cargo bench, adb scripts           |
+### 5.1 常用入口
 
-### 5.2 Rust 后端测试（workspace lib 测试 + 集成目标测试 + Criterion 基准）
-
-**内联单元测试**（`src-tauri/src/vcp_modules/` 内 `#[cfg(test)] mod tests`）：
-
-- 当前测试覆盖解析、并发 owner/epoch、生命周期、同步、持久化、更新与文件边界；总数以 `cargo test --locked --lib -- --list` 为准。
-- 纯函数优先；fixture 使用 `include_str!` / `include_bytes!` 编译期内嵌，**严禁绝对路径**
-- 新增测试优先补纯逻辑模块（如 `sync_hash`、`sync_types`、`sync_dto`、`file_extractor` helper），而非需要 mock AppHandle/DB/网络的模块
-
-**集成测试**（`src-tauri/tests/`）：
-
-- `file_extractor_integration.rs`：DOCX/XLSX/PDF/PPTX 真实样本提取 + BOM 编码 + OOM 防护
-- fixture 样本：`src-tauri/tests/fixtures/file_extractor/sample.{docx,xlsx,pdf,pptx}`（仓库内固定二进制样本）
-
-**Criterion 基准**（`src-tauri/benches/ast_tail_bench.rs`）：
-
-- 静态/流式双标准（2026-09 重订）：静态 `static_end_to_end`（parse_content 全管线，缩放比应近线性）；流式以"稳态单帧成本"为核心（`stream_frame_code_fence` / `stream_frame_protocol` / `stream_frame_markdown`，F(40960)/F(2048) < 2 视为守住 O(chunk) 增量语义），外加 `stream_worst_frame_fence_close`（闭合帧尾部延迟）、`stream_full_code_fence`（全流累计）与 `tail_syntect_highlight`（Syntect 对照基线）
-- fixture 编译期内嵌于 `src-tauri/benches/fixtures/`（素材来自 `scripts/tail-test/` 真实消息片段）
-- 运行：`cargo bench --locked --profile perf`（`profile.perf` 继承 release 优化等级，`panic=unwind`）
-- 不加自动回归门禁（阈值需随机器调整），退化检测通过人工看报告
-
-**铁律**：测试文件禁止绝对路径（如 `G:\VCPMobile\...`）；禁止无断言的纯 `println`"诊断测试"。
-
-### 5.3 Vue 前端测试
-
-**基础设施**：Vitest + happy-dom + `@vue/test-utils` + `@pinia/testing`
-
-- 配置：`vitest.config.ts`（独立配置），`@/` alias 对齐 `tsconfig.json` paths
-- setup：`src/tests/setup.ts` + `src/tests/mocks/tauri.ts` + `src/tests/mocks/browser.ts`
-- Tauri API 已统一 mock：`invoke`（命令路由式）、`listen`（事件注册表）、`Channel`（手动 emit）、`convertFileSrc`、plugin guest-js
-- 浏览器 API fallback：ResizeObserver / IntersectionObserver / matchMedia / rAF / clipboard / URL.createObjectURL / visualViewport
-
-**现有测试**（`src/tests/unit/`）：覆盖设置/UI 原语、Chat/Topic/Sync/Distributed 并发边界、富 HTML、分享 Intent，以及 Release/Android 治理契约；总数以 `pnpm test:run -- --reporter=verbose` 为准。
-
-**测试原则**：
-
-- 不断言 UnoCSS 完整 className 串；只断言语义关键类（如 `z-dialog`、`disabled`、`text-red-500`）
-- 动态渲染（KaTeX / Mermaid / 代码高亮 / HTML 预览）不断言白盒 DOM
-- 安全边界（HtmlPreviewBlock / ToolBlock / astRenderer raw_html）需单独覆盖
-
-### 5.4 Android 插件测试
-
-**目录**：`src-tauri/plugins/vcp-mobile/android/src/test/java/com/vcp/mobile/`
-
-**依赖**：JUnit 4, Robolectric 4.13, MockK, `android-all:9-robolectric-4913185-2`（显式声明避免运行时下载）
-
-**现有测试**：覆盖插件契约、执行器域、分享边界、ForegroundGuardian、SSE socket 所有权与 WindowInsets；总数以 Gradle 测试报告为准。
-
-**运行**：`cd src-tauri/gen/android; ./gradlew :tauri-plugin-vcp-mobile:testDebugUnitTest`
-
-### 5.5 Android Debug Agent 与 E2E
-
-目录：`tests/e2e-android/scripts/`
-
-详见目录README.md
-
-Agent 必须使用 `pnpm android:debug:*` 入口。禁止直接以 `pnpm tauri android dev`
-启动日常 Agent 调试，禁止清空全局 logcat、批量输出 dumpsys、自动读取多张截图或操作
-`com.vcp.avatar` Release。完整契约见 `docs/ANDROID_AGENT_DEBUGGING.md`。
-
-现有性能脚本与 Criterion benchmark 作为人工诊断/报告型资产保留；当前兼容专项不新增性能施工，也不把这些脚本描述为 nightly、Release 或固定阈值门禁。
-
-仅依赖 Node.js + adb，不引入 Maestro/Appium。
-
-### 5.6 性能脚本
-
-目录：`tests/perf/scripts/`
-
-详见目录README.md
-
-### 5.7 测试命令速查
+具体命令以当前 `package.json`、Cargo workspace 与 Gradle 工程为准。常用入口如下：
 
 ```powershell
-pnpm check                  # 完整静态检查（vue-tsc + cargo check）
-pnpm test:run               # 前端 Vitest 单测
-pnpm test:unit              # 仅 src/tests/unit
-pnpm test:integration       # Rust file_extractor 集成测试（不是 Vitest 目录）
-cargo test --locked --lib   # Rust 内联单元测试
-cargo test --locked --test file_extractor_integration  # Rust 集成测试
-cargo bench --locked --profile perf  # Rust Criterion 性能基准
-# Android 插件测试（在 src-tauri/gen/android/ 下执行）：
+pnpm check
+pnpm test:run
+pnpm test:integration
+# 在 src-tauri/：
+cargo test --locked --lib
+# 在 src-tauri/gen/android/：
 ./gradlew :tauri-plugin-vcp-mobile:testDebugUnitTest
-# E2E / 性能（需连接 Android 设备）：
-pnpm android:debug:doctor -- --json    # ADB/USB/工具链检查
-pnpm android:debug:dev                 # 低噪声 USB/HMR Debug 会话
-pnpm android:debug:status -- --json    # 有界状态对象
-pnpm android:debug:logs -- --lines 80  # Debug PID 日志，硬上限 200 行
-pnpm android:debug:snapshot            # 状态 + 有限日志落盘；截图需显式 --screenshot
-pnpm perf:apk-size          # APK 体积报告
-pnpm perf:startup           # 冷启动采样
-pnpm perf:collect:full      # 全量 dumpsys/logcat 人工诊断；Agent 日常禁用
-pnpm perf:rust-bench        # 运行 Rust 基准并归档
 ```
 
-### 5.8 测试代码组织
+### 5.2 测试资产目录
 
 ```
 VCPMobile/
-├── src/tests/                         # 前端测试
-│   ├── setup.ts                       # 全局 setup
-│   ├── mocks/{tauri,browser}.ts       # 统一 mock
-│   ├── utils/{mount,flush}.ts         # 测试工具
-│   └── unit/components/{settings,ui}/ # 原子组件测试
-├── src-tauri/tests/                   # Rust 测试正文与仓库级集成测试
-│   ├── unit/diary_service_tests.rs    # Diary 私有逻辑/HTTP 契约（cfg(test) 路径挂载）
-│   ├── fixtures/file_extractor/       # 二进制测试样本
-│   └── file_extractor_integration.rs
-├── src-tauri/benches/                 # Criterion 基准
-│   └── ast_tail_bench.rs
-├── src-tauri/plugins/vcp-mobile/android/src/test/  # Kotlin 插件测试
-├── tests/e2e-android/scripts/         # Android Debug Agent CLI 与 ADB 基础层
-└── tests/perf/scripts/               # 性能采集脚本
+├── src/tests/                                      # Vue 测试、setup、mock 与工具
+├── src-tauri/src/**                                # 与生产模块共置的 Rust 内联测试
+├── src-tauri/tests/                                # Rust 仓库级测试与 fixture
+├── src-tauri/benches/                              # Rust benchmark
+├── src-tauri/plugins/vcp-mobile/android/src/test/ # Android 插件 JVM 测试
+└── tests/
+    ├── AGENTS.md                                   # Android 验证工具的局部边界
+    ├── e2e-android/                                # Android Debug Agent 与设备旅程
+    └── perf/                                       # 本地性能采集
 ```
+
+### 5.3 Android Debug 与设备证据
+
+Agent 对设备的日常操作必须使用 `pnpm android:debug:*`，只允许操作 `com.vcp.avatar.debug`。严禁启动、停止、覆盖、清除或卸载用户的 `com.vcp.avatar` Release；不清空全局 logcat，不批量输出 dumpsys，不自动读取多张截图。
+
+`doctor`、`status`、有限日志或自动化结果只说明各自取得的状态。真机 UI、触控、性能与兼容性结论仍需对应的具名设备证据。
 
 ---
 
@@ -341,26 +257,18 @@ VCPMobile/
 
 ## 8. 部署与发布流程
 
-### CI/CD（GitHub Actions）
-
-- **`.github/workflows/ci.yml`**（PR CI）:
-  - 触发条件：`push` / `pull_request` 到 `main` / `master`。
-  - 所有第三方 Actions 固定完整 commit SHA；pnpm 使用 frozen lockfile，Cargo 命令统一 `--locked`。
-  - 工具链版本单一事实源：Node/pnpm/Java/SDK/build-tools/NDK 见 `.github/toolchain.env`（两个 workflow 首个 step 载入 `$GITHUB_ENV`）；Rust 工具链（含 clippy/rustfmt 组件与 aarch64 target）见仓库根 `rust-toolchain.toml`，本地 rustup shim 与 CI 的 dtolnay/rust-toolchain 均自动读取。
-  - 步骤：类型检查与 Vitest → Rust fmt/test/integration/clippy → `tauri android init --ci` 生成树漂移检查 → Gradle JVM 测试 → pnpm audit。
-  - 需要 Java 17 + Android SDK + Tauri Linux 依赖。
-- **`.github/workflows/release.yml`**（Release）:
-  - 触发条件：GitHub Release 被 `published`。
-  - 环境：Node 22, pnpm 10, Java 17 (temurin), Android NDK `29.0.13846066`。
-  - Release tag、checkout HEAD 与 event SHA 必须一致；四处版本源与 Android versionCode 必须一致。发布不再要求同 commit 的 CI Check 已成功。
-  - 从 step 级 secrets 恢复密钥库；验签步骤要求 APK 单一签名者且拒绝调试证书。
-  - 构建启用显式受信 LAN 模式；只上传签名 arm64 APK 及其 SHA-256 文件，不发布独立前端 ZIP。
+CI 与 Release 的当前行为由 `.github/workflows/ci.yml`、`.github/workflows/release.yml` 及其实际读取的配置定义。普通开发任务不展开、不修改发布流程；只有用户明确要求 CI、版本、签名或发布变更时才读取当前 workflow 并完成对应验证。未经用户明确要求不得 push、创建 Release 或执行发布动作。
 
 
 ---
 
 ## 9. AI 代理与贡献约定
 
+### 9.1 工作树与单次存档
+
+开始任务时检查 Git 状态并保留全部无关修改。同一逻辑任务最多建立一次必要的 checkpoint；干净 HEAD 或本任务已有的可恢复点已经足够，不创建空提交或重复的 `save` 提交。
+
+只有在即将新建/删除模块、拆分 God File、移动模块边界或修改 `mod.rs`/`lib.rs`，且相关未提交工作尚无可恢复点时，才先向用户说明并建立范围明确的 checkpoint。只暂存已核对的任务路径，禁止使用 `git add .`，未经用户授权不得提交。
 
 ### 9.2 Magi 三贤者协议
 
@@ -370,27 +278,11 @@ VCPMobile/
 - **Balthasar (直觉与美学)**: 审查移动端原生直觉、Glassmorphism 规范、微动画、交互心理学。
 - **Casper (务实与交付)**: 审查工程复杂度、维护成本、实现周期，拒绝过度设计。
 
+### 9.3 破坏性 Git 操作
 
-### 9.4 重构前强制存档协议（血训）
+执行 `git checkout`、`git restore` 或其他可能抛弃修改的命令前，必须先展示并说明当前 Git 状态、精确目标和影响范围，并取得用户明确同意。存在未存档修改时优先复用本任务 checkpoint；确需新增存档仍只处理明确的任务路径。
 
-**任何涉及以下操作之前，必须先执行 `git add . && git commit -m "save"`（或等效存档）：**
-
-- 新建/删除模块目录或文件
-- 拆分超过 500 行的 God File
-- 移动类型/函数到新的模块边界
-- 修改 `mod.rs` 或 `lib.rs` 的模块声明
-
-**理由**: 工作区修改（Working Tree）不受 `git checkout --` 保护。一旦全文覆盖出错，没有干净的回退点。git commit 是唯一可靠的时光机。
-
-### 9.5 每次 checkout / restore 前强制看 git 状态协议（2026-05-24 血训）
-
-**绝对铁律：任何 AI 代理在执行 `git checkout`、`git restore` 或任何可能会抛弃工作区修改的 Git 命令前，必须强制遵循以下三条红线：**
-
-1. **必须首先调用 `git status` 向用户展示并汇报当前的修改状态。**
-2. **严禁在没有得到用户明确的同意和核准之前，擅自执行任何 `git checkout` 或 `git restore` 抛弃修改的命令。**
-3. **极力建议在执行任何清洗/覆写命令前，先执行 `git add . && git commit -m "pre-checkout-save"` 将当前工作区彻底锁死在 Git 历史中。**
-
-**理由**: 工作区不受 checkout 保护，只有 commit 是唯一可靠的时光机。不看 git 状态就 checkout 约等于直接抹杀代码。
+**不得用清理工作树、切分提交或“恢复干净状态”为由**覆盖用户修改。安全来自可核对的目标和一个可恢复点，不来自更多提交。
 
 ---
 
@@ -401,29 +293,29 @@ VCPMobile/
 | `package.json`                                   | 前端依赖、pnpm 脚本                                          |
 | `src-tauri/Cargo.toml`                           | Rust 依赖、Android 构建目标、Release 优化                    |
 | `src-tauri/tauri.conf.json`                      | Tauri 窗口、安全、Bundle、beforeDevCommand/beforeBuildCommand |
-| `vite.config.ts`                                 | Vite 插件、Tauri 感知端口（1420/1421）                       |
+| `vite.config.ts`                                 | Vite 插件与 Tauri 开发、构建配置                             |
 | `uno.config.ts`                                  | UnoCSS 预设、主题色、快捷类、断点                            |
 | `tsconfig.json`                                  | TS 严格模式、路径包含/排除规则                               |
-| `docs/SYNC_ARCHITECTURE.md`                      | 三阶段增量同步协议的完整规范（WebSocket + HTTP + SHA-256 Hash 差异） |
-| `docs/vue_docs/`                                 | 前端 Vue/TS 知识库（27 份，含架构总览、Store 全景、Feature 详解） |
-| `docs/modules/`                                  | 稳定 Rust 模块技术文档集（31 份，含 AST Diff 专栏与快速决策树） |
-| `docs/sync/`                                     | 同步 V2 子系统文档集（20 份）                                |
-| `docs/plugins/`                                  | Android 原生插件代码文档集（13 份）                          |
+| `docs/SYNC_ARCHITECTURE.md`                      | 同步架构参考材料                                             |
+| `docs/vue_docs/`                                 | 前端 Vue/TypeScript 参考材料                                 |
+| `docs/modules/`                                  | Rust 模块参考材料                                            |
+| `docs/sync/`                                     | 同步子系统参考材料                                           |
+| `docs/plugins/`                                  | Android 原生插件参考材料                                     |
 | `docs/ANDROID_PLUGIN_MANAGEMENT.md`              | Android 插件管理规范：权限血训、前台服务、通知渠道           |
 | `docs/ANDROID_UI_COMPATIBILITY.md`               | Android arm64 支持范围、响应式布局、CSS/Insets 与设备证据规范 |
-| `docs/UI_LAYER_ARCHITECTURE.md`                  | UI 层级架构规范：12 级语义化 Z-Index 体系                    |
-| `src-tauri/plugins/vcp-mobile/Cargo.toml`        | 插件 Rust 依赖：`tauri = 2.11.1`, `jni = 0.21`（Android only） |
+| `docs/UI_LAYER_ARCHITECTURE.md`                  | UI 语义化层级参考材料                                       |
+| `src-tauri/plugins/vcp-mobile/Cargo.toml`        | 插件 Rust 依赖与构建元数据                                   |
 | `src-tauri/plugins/vcp-mobile/android/`          | Kotlin 源码与 AndroidManifest.xml                            |
 | `src-tauri/plugins/vcp-mobile/permissions/`      | Tauri v2 权限声明：default.toml + autogenerated schemas      |
-| `vitest.config.ts`                               | 前端测试配置（Vitest + happy-dom + @vue/test-utils）         |
-| `src/tests/`                                     | 前端测试代码（setup/mocks/utils/unit）                       |
-| `src-tauri/tests/`                               | Rust 仓库级集成测试（file_extractor）                        |
-| `src-tauri/benches/`                             | Rust Criterion 性能基准（ast_tail_bench）                    |
-| `src-tauri/plugins/vcp-mobile/android/src/test/` | Android 插件单元测试（Kotlin JVM + Robolectric）             |
-| `tests/e2e-android/scripts/`                     | adb smoke 脚本（安装/授权/启动/信息采集）                    |
-| `tests/perf/scripts/`                            | 本地性能脚本（APK体积/启动/bench/快照），不进入 CI Release   |
-| `docs/Test_Architecture_Constraints.md`          | 测试体系架构约束文档（全局约束）                             |
+| `vitest.config.ts`                               | 前端测试运行与环境配置                                       |
+| `src/tests/`                                     | 前端测试资产                                                 |
+| `src-tauri/tests/`                               | Rust 仓库级测试资产                                          |
+| `src-tauri/benches/`                             | Rust benchmark                                               |
+| `src-tauri/plugins/vcp-mobile/android/src/test/` | Android 插件 JVM 测试资产                                    |
+| `tests/e2e-android/scripts/`                     | Android Debug Agent 与设备操作脚本                           |
+| `tests/perf/scripts/`                            | 本地性能采集脚本                                             |
+| `docs/Test_Architecture_Constraints.md`          | 测试体系参考材料                                             |
 
 ---
 
-*最后更新：2026-08-13 | VCP Mobile v1.1.4。若项目结构发生重大变化，请同步更新本文件。*
+*目录结构或工作入口发生变化时，按当前代码更新本索引。*
