@@ -433,7 +433,7 @@ Robolectric 的 instrumented Android JAR 由测试运行期解析。仓库只保
 
 1. 在 tracked issue 或 `docs/` 对应模块记录 CVE 编号、影响范围与升级方案；当前仓库未启用 `plans/`。
 2. 执行完整更新流程（第 3 节）。
-3. 必须经过 **Magi 三贤者协议**快速评审（见 `CLAUDE.md` 第 9.2 节）：
+3. 必须经过 **Magi 三贤者协议**快速评审（见 `AGENTS.md` 第 9.2 节）：
    - Melchior：确认 Rust 侧 ABI 兼容性。
    - Balthasar：确认 Android 端交互与 UI 无异常。
    - Casper：确认升级成本与发布排期不冲突。
