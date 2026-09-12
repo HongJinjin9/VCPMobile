@@ -1,6 +1,6 @@
 # AGENTS.md — VCP Mobile (Project Avatar)
 
-> 本文件面向中文 AI 编程代理。阅读者被假设对该项目一无所知。所有信息均基于项目实际内容，未经验证的假设已被剔除。
+> 本文件记录用户决定、工作边界与代码导航，不承担实现事实。当前生产代码是实现事实的唯一来源；文档、计划和测试均不能覆盖它，测试断言不得反向定义产品行为。
 
 ---
 
@@ -77,11 +77,8 @@ VCPMobile/
 │   ├── Cargo.toml              # Rust 依赖与构建配置
 │   ├── tauri.conf.json         # Tauri 配置
 │   └── plugins/
-│       └── vcp-mobile/         # Android 原生插件（详见 §2.2）
-│           ├── src/            # 插件 Rust 侧
-│           ├── android/        # 插件 Kotlin 侧
-│           ├── guest-js/       # 前端调用封装
-│           └── permissions/    # Tauri v2 权限声明
+│       └── vcp-mobile/         # Android 原生插件
+│           └── AGENTS.md       # 插件局部代码地图与修改闭环
 ├── docs/                       # 技术文档体系（详见 §2.1）
 │   ├── vue_docs/               # 前端知识库
 │   ├── modules/                # Rust 模块文档
@@ -122,68 +119,7 @@ VCPMobile/
 
 ### 2.2 Android 原生插件（`tauri-plugin-vcp-mobile`）
 
-项目用**单一自定义插件** `tauri-plugin-vcp-mobile` 统一管理全部 Android 原生能力，源码位于 `src-tauri/plugins/vcp-mobile/`。
-
-#### 插件入口与命令注册
-
-- `src/lib.rs` 是插件唯一入口，注册全部 Tauri 命令（当前 47 条，详见 `docs/plugins/01_插件初始化与命令路由.md` §4）。划词助手的 `request_overlay_permission` / `toggle_floating_ball` 实现作为技术资产保留，但不再注册为可调用命令。
-- 命令按领域分为三个 Rust 模块：
-  - `screen.rs`：屏幕常亮（2 条）
-  - `stream.rs`：流式保活、前台锁、分布式保活、`:helper` 进程 SSE 代理（5 条以上）
-  - `system.rs`：权限、系统控制、硬件状态、文件选择、Root 等（30 条以上）
-- `setup` 中注册 Android 插件 `com.vcp.mobile / VcpMobilePlugin`，将 `PluginHandle` 注入 `VcpMobileState`，供后续 `run_mobile_plugin` 调用 Kotlin 方法。
-- **新增命令必须四重注册**：`lib.rs` 的 `invoke_handler` → `build.rs` 的 `COMMANDS` 数组 → `permissions/*.toml` → `guest-js/index.ts`。参见 §2.3。
-
-#### 通信方式分层
-
-前端与原生层有四条独立通道：
-
-| 通道                                                         | 典型功能                                                     | 数据流                                                       | 前端接收方式                                         |
-| ------------------------------------------------------------ | ------------------------------------------------------------ | ------------------------------------------------------------ | ---------------------------------------------------- |
-| **Tauri invoke → Rust command → `run_mobile_plugin` → Kotlin** | 权限请求、流式保活、电池/网络/CPU 状态、文件选择、Root 命令等 | `invoke('plugin:vcp-mobile\|xxx')` → `lib.rs` 路由 → `screen.rs`/`stream.rs`/`system.rs` → `PluginHandle.run_mobile_plugin("method", payload)` → `VcpMobilePlugin.kt` | `invoke` 返回值 / `Promise`                          |
-| **Raw JNI**                                                  | 屏幕常亮                                                     | `screen.rs` 直接通过 `jni` crate 调用 `activity.getWindow().add/clearFlags(FLAG_KEEP_SCREEN_ON)` | `invoke` 返回值                                      |
-| **`evaluateJavascript` → `window.CustomEvent`**              | 键盘 Insets                                                  | `KeyboardInsetsManager` 监听 `WindowInsets` 后注入 `vcp-keyboard-inset` 事件 | `window.addEventListener('vcp-keyboard-inset', ...)` |
-| **`plugin.trigger("lifecycle")` → Rust → `app.emit`**        | 前后台生命周期                                               | `LifecycleBridge` 进程级观察 → Rust 监听内部通道 → 发射 `vcp-lifecycle-changed` | `listen('vcp-lifecycle-changed', ...)`               |
-
-> **注意**：生命周期事件 v1.1.2 后已改为 Tauri 事件通道，不再走 `evaluateJavascript`。旧版 2.2 中"生命周期事件用 evaluateJavascript"的描述已过时。
-
-#### 核心组件职责
-
-| 组件                             | 位置                                                    | 职责                                                         |
-| -------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------ |
-| `VcpMobileState`                 | `src/lib.rs`                                            | 持有 `PluginHandle`；非 Android host fallback 用 `PhantomData` 占位（仅开发/测试） |
-| `VcpMobilePlugin`                | `android/.../VcpMobilePlugin.kt`                        | Kotlin 侧命令路由；持有 Battery/CPU/GPU/Network/Sensor/FloatingWindow/ShareIntent 等管理器 |
-| `ForegroundGuardian`             | `android/.../service/ForegroundGuardian.kt`             | 进程级单例；统一调度 WakeLock + WifiLock + 前台服务；四级优先级（SYNC=40 / PRERENDER=30 / STREAM=20 / DISTRIBUTED=10） |
-| `StreamKeepaliveService`         | `android/.../service/StreamKeepaliveService.kt`         | 前台服务"通知壳"，只负责 `startForeground()`；锁管理已移交 ForegroundGuardian |
-| `SseProxyService`                | `android/.../service/SseProxyService.kt`                | 运行在独立 `:helper` 进程；本地 TCP + SSE 代理 + 断线内存缓存；自行管理双锁 |
-| `KeyboardInsetsManager`          | `android/.../KeyboardInsetsManager.kt`                  | 监听软键盘 Insets，推送 `vcp-keyboard-inset` 事件            |
-| `LifecycleBridge`                | `android/.../LifecycleBridge.kt`                        | 通过 `ProcessLifecycleOwner` 进程级观察生命周期，经 Rust 中转给前端 |
-| 硬件状态管理器                   | `android/.../BatteryStatusManager.kt` 等                | 采集电量、CPU 热状态、GPU、网络、传感器等                    |
-| `VcpNotificationListenerService` | `android/.../service/VcpNotificationListenerService.kt` | 通知栏监听占位服务（当前不做实际处理，保护隐私）             |
-
-
-#### 排查参考
-
-- 命令注册表与数据流：`docs/plugins/01_插件初始化与命令路由.md`
-- 屏幕常亮：`docs/plugins/02_屏幕常亮控制.md`
-- 流式保活与 `ForegroundGuardian`：`docs/plugins/03_流式前台保活服务.md`、`docs/plugins/11_ForegroundGuardian_前台守护者.md`
-- 键盘 Insets：`docs/plugins/04_键盘Insets管理.md`
-- 生命周期桥接：`docs/plugins/05_生命周期桥接.md`
-- 权限与系统控制：`docs/plugins/06_权限与系统控制.md`
-- Guest JS API：`docs/plugins/07_Guest JS API.md`
-- 总览与导航：`docs/plugins/00_总览与导航.md`
-
-### 2.3 插件权限声明（`permissions/`）
-
-Tauri v2 要求每个 command 被 capability 显式授权。新增插件命令时，必须同时更新以下三处，否则前端调用会报 `not allowed`：
-
-1. `src-tauri/plugins/vcp-mobile/src/lib.rs` 的 `invoke_handler`
-2. `src-tauri/plugins/vcp-mobile/permissions/default.toml` 和 `all.toml` 的 `commands.allow`
-3. `src-tauri/plugins/vcp-mobile/build.rs` 的 `COMMANDS` 数组
-
-修改后执行 `pnpm check` 重新生成 autogenerated 文件和 schema。若从 `lib.rs` 移除命令，应手动删除对应的 `permissions/autogenerated/commands/<命令名>.toml`，避免残留僵尸权限。
-
-> 本项目 capability 引用的是 `vcp-mobile:allow-all`，运行时真正生效的是 `all.toml`。`default.toml` 仅作为插件默认权限包存在。
+`src-tauri/plugins/vcp-mobile/` 是 Android 原生能力边界。修改该子树前先读取其 [`AGENTS.md`](src-tauri/plugins/vcp-mobile/AGENTS.md)，再从当前 Rust、Kotlin、TypeScript 或 C++ 生产代码追踪实际入口与所有者。
 
 ---
 
