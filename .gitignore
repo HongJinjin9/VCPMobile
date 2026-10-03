@@ -30,6 +30,7 @@ vcp-mobile.keystore
 *.tsbuildinfo
 
 # AI Knowledge Base & Docs
+/plans/
 plans_back.zip
 .gemini_snapshot.json
 /*.md
