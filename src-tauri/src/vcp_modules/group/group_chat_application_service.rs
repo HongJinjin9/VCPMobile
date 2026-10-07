@@ -19,6 +19,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use tauri::{ipc::Channel, AppHandle, Emitter, Manager, State};
+use tauri_plugin_vcp_mobile::stream::{ForegroundLease, ForegroundTask};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -153,11 +154,8 @@ async fn run_group_speaker_turn(
     )
     .await?;
 
-    if let Err(error) =
-        tauri_plugin_vcp_mobile::stream::start_stream_service_inner(app_handle, &agent_name)
-    {
-        log::warn!("[GroupChatAppService] Failed to start streaming service: {error}");
-    }
+    let foreground_lease =
+        ForegroundLease::acquire(app_handle, ForegroundTask::Stream, &agent_name).ok();
 
     // 发射 thinking 事件，让前端为当前接力的 Agent 创建思考占位消息
     if let Some(chan) = stream_channel {
@@ -173,13 +171,8 @@ async fn run_group_speaker_turn(
     .await;
 
     // 停止前台服务
-    if let Err(e) =
-        tauri_plugin_vcp_mobile::stream::stop_stream_service_inner(app_handle, &agent_name)
-    {
-        log::warn!(
-            "[GroupChatAppService] Failed to stop streaming service: {}",
-            e
-        );
+    if let Some(lease) = foreground_lease {
+        let _ = lease.release();
     }
 
     if let Ok((res, is_aborted)) = res_result {

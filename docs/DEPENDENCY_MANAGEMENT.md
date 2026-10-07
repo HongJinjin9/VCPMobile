@@ -142,7 +142,7 @@ Tauri 核心组件必须**严格同版本或遵循官方发布的兼容矩阵**�
 | `compileSdk` | `36` | 跟随 AGP / 每年 | Android SDK Manager | — |
 | `targetSdk` | `36` | 跟随 `compileSdk` | Android SDK Manager | 必须与 `compileSdk` 一致 |
 | `minSdk` | `26` | 仅业务需求驱动 | Android SDK Manager | `tauri.conf.json` 中同步声明 |
-| Android NDK | `29.0.13846066` | 每年或跟随 Tauri 要求 | Android SDK Manager | Rust `aarch64-linux-android` 目标依赖 |
+| Android NDK | `29.0.14206865` | 每年或跟随 Tauri 要求 | Android SDK Manager | Rust `aarch64-linux-android` 目标依赖 |
 | `androidx.webkit:webkit` | `1.14.0` | 每季度检查 | Google Maven | WebView 扩展 |
 | `androidx.appcompat:appcompat` | `1.7.1` | 每季度检查 | Google Maven | AppCompat |
 | `androidx.activity:activity-ktx` | `1.10.1` | 每季度检查 | Google Maven | Activity KTX |
@@ -371,8 +371,11 @@ pnpm tauri android build --apk --target aarch64
 
 | 环境 | 当前 NDK 版本 | 配置位置 |
 |------|--------------|---------|
-| Release (`release.yml`) | `29.0.13846066` | `.github/workflows/release.yml` |
-| 本地开发 | `29.0.13846066` | `toolchain.env.local` / `$ANDROID_SDK_ROOT/ndk/` |
+| Release (`release.yml`) | `29.0.14206865` | `.github/toolchain.env`（由 workflow 读取） |
+| Android 原生插件 | `29.0.14206865` | `src-tauri/plugins/vcp-mobile/android/build.gradle.kts` |
+| 本地开发 | `29.0.14206865` | Android SDK 的 `ndk/29.0.14206865/` |
+
+随包分发的 PRoot 二进制保留独立的构建来源记录和精确复现脚本；其中的历史 NDK 版本不作为应用当前构建版本。更新这些记录须先重建二进制并核对哈希。
 
 **规则**：
 

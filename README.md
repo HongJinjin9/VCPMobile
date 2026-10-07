@@ -184,7 +184,7 @@ sequenceDiagram
 
 ### 开发者环境
 
-**Prerequisites**：Rust (stable, edition 2021) · Node.js 22+ · pnpm 10 · Java 17 (temurin) · Android SDK + NDK `29.0.13846066`
+**Prerequisites**：Rust (stable, edition 2021) · Node.js 22+ · pnpm 10 · Java 17 (temurin) · Android SDK + NDK `29.0.14206865`
 
 ```bash
 git clone https://github.com/MRiecy/VCPMobile.git && cd VCPMobile

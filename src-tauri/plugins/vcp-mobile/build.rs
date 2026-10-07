@@ -1,8 +1,6 @@
 const COMMANDS: &[&str] = &[
     "set_keep_screen_on",
     "clear_keep_screen_on",
-    "start_streaming_service",
-    "stop_streaming_service",
     "acquire_foreground",
     "release_foreground",
     "start_helper_service",

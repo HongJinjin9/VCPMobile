@@ -1497,11 +1497,12 @@ async fn run_sync_session(
     let write_queue = Arc::new(DbWriteQueue::new(&db, session_id));
 
     #[cfg(target_os = "android")]
-    let sync_guardian_acquired = match tauri_plugin_vcp_mobile::stream::start_stream_service_inner(
+    let sync_guardian_lease = match tauri_plugin_vcp_mobile::stream::ForegroundLease::acquire(
         &app_handle,
+        tauri_plugin_vcp_mobile::stream::ForegroundTask::Sync,
         SYNC_GUARDIAN_LABEL,
     ) {
-        Ok(()) => true,
+        Ok(lease) => Some(lease),
         Err(error) => {
             let message = format!(
                 "Failed to acquire Android sync foreground lease; continuing without keepalive: {}",
@@ -1515,7 +1516,7 @@ async fn run_sync_session(
                 "warning",
                 "后台保活申请失败，本次同步仍将继续",
             );
-            false
+            None
         }
     };
     let write_queue_task = write_queue.clone();
@@ -3021,14 +3022,15 @@ async fn run_sync_session(
         Err(_) => log::error!("[SyncLogger] Session logger lock is poisoned during shutdown"),
     }
 
+    // Each session releases only its own native lease, even after losing ownership.
+    #[cfg(target_os = "android")]
+    if let Some(lease) = sync_guardian_lease {
+        let _ = lease.release();
+    }
     let sync_state = app_handle.state::<SyncState>();
     let _owner_commit = sync_state.owner_commit.lock().await;
     if sync_state.current_session_id.load(Ordering::SeqCst) == session_id {
         sync_state.ws_sender.clear_if_owner(session_id);
-        #[cfg(target_os = "android")]
-        if sync_guardian_acquired {
-            release_sync_guardian_with_diagnostics(&app_handle);
-        }
         {
             let mut logger_guard = sync_state.current_logger.write().unwrap();
             *logger_guard = None;
@@ -3192,19 +3194,6 @@ fn emit_operator_sync_log<R: Runtime>(
     );
 }
 
-#[cfg(target_os = "android")]
-fn release_sync_guardian_with_diagnostics(app_handle: &AppHandle) {
-    if let Err(error) =
-        tauri_plugin_vcp_mobile::stream::stop_stream_service_inner(app_handle, SYNC_GUARDIAN_LABEL)
-    {
-        emit_sync_log(
-            app_handle,
-            "warning",
-            &format!("Failed to release Android sync foreground lease: {}", error),
-        );
-    }
-}
-
 #[tauri::command]
 pub async fn stop_sync(
     #[allow(unused_variables)] handle: AppHandle,
@@ -3232,8 +3221,6 @@ pub async fn stop_sync(
         let mut guard = state.connection_status.write().await;
         *guard = "disconnected".to_string();
     }
-    #[cfg(target_os = "android")]
-    release_sync_guardian_with_diagnostics(&handle);
     let logger_clear_result = state
         .current_logger
         .write()

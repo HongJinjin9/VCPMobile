@@ -4,13 +4,72 @@ use tauri::{AppHandle, Manager, Runtime};
 #[allow(unused_imports)]
 use crate::VcpMobileState;
 
-fn stream_guardian_tag(agent_name: &str) -> String {
-    if agent_name.contains("[数据同步]") {
-        "sync".to_string()
-    } else if agent_name.contains("[预渲染重建]") {
-        "prerender".to_string()
-    } else {
-        format!("stream:{}", agent_name)
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static NEXT_LEASE_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Business intent is explicit; a display name never determines resource policy.
+#[derive(Clone, Copy)]
+pub enum ForegroundTask {
+    Stream,
+    Sync,
+    Prerender,
+}
+
+impl ForegroundTask {
+    fn policy(self) -> (&'static str, i32, bool) {
+        match self {
+            Self::Stream => ("stream", 20, false),
+            Self::Sync => ("sync", 40, true),
+            Self::Prerender => ("prerender", 30, true),
+        }
+    }
+
+    fn unique_tag(self) -> String {
+        format!(
+            "{}:{}",
+            self.policy().0,
+            NEXT_LEASE_ID.fetch_add(1, Ordering::Relaxed)
+        )
+    }
+}
+
+/// One operation owns one native consumer, including when its future is cancelled.
+/// Not Clone: ownership and release cannot accidentally be duplicated.
+pub struct ForegroundLease<R: Runtime> {
+    app: AppHandle<R>,
+    tag: Option<String>,
+}
+
+impl<R: Runtime> ForegroundLease<R> {
+    pub fn acquire(app: &AppHandle<R>, task: ForegroundTask, label: &str) -> Result<Self, String> {
+        let tag = task.unique_tag();
+        let (_, priority, screen_keep_on) = task.policy();
+        acquire_foreground_inner(app, &tag, priority, label, screen_keep_on)?;
+        Ok(Self {
+            app: app.clone(),
+            tag: Some(tag),
+        })
+    }
+
+    pub fn release(mut self) -> Result<(), String> {
+        if let Some(tag) = self.tag.take() {
+            release_foreground_inner(&self.app, &tag)?;
+        }
+        Ok(())
+    }
+}
+
+impl<R: Runtime> Drop for ForegroundLease<R> {
+    fn drop(&mut self) {
+        if let Some(tag) = self.tag.take() {
+            let app = self.app.clone();
+            // Mobile IPC waits for Android. Cancellation cleanup must not block
+            // the thread dropping the future (or a native event callback).
+            tauri::async_runtime::spawn_blocking(move || {
+                let _ = release_foreground_inner(&app, &tag);
+            });
+        }
     }
 }
 
@@ -24,19 +83,25 @@ pub fn acquire_foreground_inner<R: Runtime>(
 ) -> Result<(), String> {
     #[cfg(target_os = "android")]
     {
-        let state = _app.state::<VcpMobileState<R>>();
-        let plugin_handle = state.mobile_plugin_handle()?;
-        plugin_handle
-            .run_mobile_plugin::<serde_json::Value>(
-                "acquireForeground",
-                serde_json::json!({
-                    "tag": tag,
-                    "priority": priority,
-                    "label": label,
-                    "screenKeepOn": screen_keep_on
-                }),
-            )
-            .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
+        let result = (|| {
+            let state = _app.state::<VcpMobileState<R>>();
+            let plugin_handle = state.mobile_plugin_handle()?;
+            plugin_handle
+                .run_mobile_plugin::<serde_json::Value>(
+                    "acquireForeground",
+                    serde_json::json!({
+                        "tag": tag,
+                        "priority": priority,
+                        "label": label,
+                        "screenKeepOn": screen_keep_on
+                    }),
+                )
+                .map_err(|e| format!("acquireForeground failed: {}", e))
+        })();
+        result.map_err(|error| {
+            crate::events::report_service_failure(_app, "guardian", &error);
+            error
+        })?;
     }
 
     log::info!(
@@ -51,14 +116,20 @@ pub fn acquire_foreground_inner<R: Runtime>(
 pub fn release_foreground_inner<R: Runtime>(_app: &AppHandle<R>, tag: &str) -> Result<(), String> {
     #[cfg(target_os = "android")]
     {
-        let state = _app.state::<VcpMobileState<R>>();
-        let plugin_handle = state.mobile_plugin_handle()?;
-        plugin_handle
-            .run_mobile_plugin::<serde_json::Value>(
-                "releaseForeground",
-                serde_json::json!({ "tag": tag }),
-            )
-            .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
+        let result = (|| {
+            let state = _app.state::<VcpMobileState<R>>();
+            let plugin_handle = state.mobile_plugin_handle()?;
+            plugin_handle
+                .run_mobile_plugin::<serde_json::Value>(
+                    "releaseForeground",
+                    serde_json::json!({ "tag": tag }),
+                )
+                .map_err(|e| format!("releaseForeground failed: {}", e))
+        })();
+        result.map_err(|error| {
+            crate::events::report_service_failure(_app, "guardian", &error);
+            error
+        })?;
     }
 
     log::info!("[VcpMobilePlugin] release_foreground_inner: tag={}", tag);
@@ -66,41 +137,17 @@ pub fn release_foreground_inner<R: Runtime>(_app: &AppHandle<R>, tag: &str) -> R
     Ok(())
 }
 
-/// Start the stream keepalive service (兼容老版本接口)
-pub fn start_stream_service_inner<R: Runtime>(
-    app: &AppHandle<R>,
-    agent_name: &str,
-) -> Result<(), String> {
-    let tag = stream_guardian_tag(agent_name);
-    let priority = if agent_name.contains("[数据同步]") {
-        40
-    } else if agent_name.contains("[预渲染重建]") {
-        30
-    } else {
-        20
-    };
-    let screen_keep_on = agent_name.contains("[数据同步]") || agent_name.contains("[预渲染重建]");
-    acquire_foreground_inner(app, &tag, priority, agent_name, screen_keep_on)
-}
-
-/// Stop the stream keepalive service (兼容老版本接口)
-pub fn stop_stream_service_inner<R: Runtime>(
-    app: &AppHandle<R>,
-    agent_name: &str,
-) -> Result<(), String> {
-    let tag = stream_guardian_tag(agent_name);
-    release_foreground_inner(app, &tag)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::stream_guardian_tag;
+    use super::ForegroundTask;
 
     #[test]
-    fn stream_domains_use_their_explicit_guardian_tags() {
-        assert_eq!(stream_guardian_tag("[数据同步] 增量"), "sync");
-        assert_eq!(stream_guardian_tag("[预渲染重建] Aurora"), "prerender");
-        assert_eq!(stream_guardian_tag("Nova"), "stream:Nova");
+    fn concurrent_operations_never_share_a_guardian_tag() {
+        let first = ForegroundTask::Stream.unique_tag();
+        let second = ForegroundTask::Stream.unique_tag();
+        assert_ne!(first, second);
+        assert!(first.starts_with("stream:"));
+        assert!(second.starts_with("stream:"));
     }
 }
 
@@ -133,21 +180,6 @@ pub fn release_foreground<R: Runtime>(app: AppHandle<R>, tag: String) -> Result<
 }
 
 #[tauri::command]
-pub fn start_streaming_service<R: Runtime>(
-    app: AppHandle<R>,
-    agent_name: String,
-) -> Result<(), String> {
-    start_stream_service_inner(&app, &agent_name)
-}
-
-#[tauri::command]
-pub fn stop_streaming_service<R: Runtime>(
-    app: AppHandle<R>,
-    agent_name: String,
-) -> Result<(), String> {
-    stop_stream_service_inner(&app, &agent_name)
-}
-#[tauri::command]
 pub fn set_keepalive_mode<R: Runtime>(app: AppHandle<R>, is_keepalive: bool) -> Result<(), String> {
     set_keepalive_mode_inner(&app, is_keepalive)
 }
@@ -157,11 +189,17 @@ pub fn set_keepalive_mode<R: Runtime>(app: AppHandle<R>, is_keepalive: bool) -> 
 pub fn start_helper_service<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     #[cfg(target_os = "android")]
     {
-        let state = app.state::<VcpMobileState<R>>();
-        let plugin_handle = state.mobile_plugin_handle()?;
-        plugin_handle
-            .run_mobile_plugin::<serde_json::Value>("startHelperService", serde_json::json!({}))
-            .map_err(|e| format!("startHelperService failed: {}", e))?;
+        let result = (|| {
+            let state = app.state::<VcpMobileState<R>>();
+            let plugin_handle = state.mobile_plugin_handle()?;
+            plugin_handle
+                .run_mobile_plugin::<serde_json::Value>("startHelperService", serde_json::json!({}))
+                .map_err(|e| format!("startHelperService failed: {}", e))
+        })();
+        result.map_err(|error| {
+            crate::events::report_service_failure(&app, "helper", &error);
+            error
+        })?;
     }
     log::info!("[VcpMobilePlugin] start_helper_service called");
     Ok(())

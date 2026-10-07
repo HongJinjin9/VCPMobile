@@ -109,20 +109,6 @@ class PluginContractTest {
     }
 
     @Test
-    fun guestJsStopStreamServicePassesAgentNameArgument() {
-        val guestJs = File(pluginRoot, "guest-js/index.ts").readText()
-
-        assertTrue(
-            "stopStreamService 应接收 agentName 参数",
-            Regex("function\\s+stopStreamService\\s*\\(\\s*agentName\\s*:\\s*string\\s*\\)").containsMatchIn(guestJs),
-        )
-        assertTrue(
-            "stopStreamService invoke 应传递 { agentName }",
-            guestJs.contains("plugin:vcp-mobile|stop_streaming_service") && guestJs.contains("{ agentName }"),
-        )
-    }
-
-    @Test
     fun nativeFileBridgeKeepsViewAndAddsReadOnlySystemShare() {
         val rustSystem = File(pluginRoot, "src/system.rs").readText()
         val guestJs = File(pluginRoot, "guest-js/index.ts").readText()
@@ -156,7 +142,7 @@ class PluginContractTest {
 
     @Test
     fun rustRunMobilePluginMethodNamesExistInKotlinPlugin() {
-        val rustSources = listOf("src/system.rs", "src/stream.rs", "src/cli.rs")
+        val rustSources = listOf("src/system.rs", "src/stream.rs", "src/cli.rs", "src/events.rs")
             .map { File(pluginRoot, it).readText() }
             .joinToString("\n")
         val kotlinPlugin = File(
@@ -164,7 +150,7 @@ class PluginContractTest {
             "android/src/main/java/com/vcp/mobile/VcpMobilePlugin.kt",
         ).readText()
 
-        val methodNames = Regex("run_mobile_plugin(?:::<[^>]+>)?\\(\\s*\"([A-Za-z0-9_]+)\"")
+        val methodNames = Regex("run_mobile_plugin(?:_async)?(?:::<[^>]+>)?\\(\\s*\"([A-Za-z0-9_]+)\"")
             .findAll(rustSources)
             .map { it.groupValues[1] }
             .toSet()
@@ -179,11 +165,11 @@ class PluginContractTest {
     @Test
     fun rustMobilePluginCallsDoNotHoldHandleMutexWhileWaitingForKotlin() {
         val libRs = File(pluginRoot, "src/lib.rs").readText()
-        val commandSources = listOf("src/system.rs", "src/stream.rs", "src/cli.rs")
+        val commandSources = listOf("src/system.rs", "src/stream.rs", "src/cli.rs", "src/events.rs")
             .map { File(pluginRoot, it).readText() }
             .joinToString("\n")
 
-        assertTrue("PluginHandle 必须在锁内 clone", libRs.contains(".as_ref()\n            .cloned()"))
+        assertTrue("PluginHandle 必须在锁内 clone", Regex("\\.as_ref\\(\\)\\s*\\.cloned\\(\\)").containsMatchIn(libRs))
         assertTrue("command 必须通过短锁 helper 获取句柄", commandSources.contains("mobile_plugin_handle()?"))
         assertTrue("command 不得直接持锁跨 run_mobile_plugin", !commandSources.contains("plugin_handle.lock()"))
     }

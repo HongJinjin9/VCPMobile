@@ -131,6 +131,43 @@ export function useNotificationProcessor() {
   const processPayload = (rawPayload: unknown): Partial<VcpNotification> => {
     const payload = parseObjectLike(rawPayload);
     if (!payload) return { silent: true };
+
+    // 原生后台能力异常沿全局通知通道展示；保留至用户关闭，避免后台或启动期间过期。
+    if (payload.type === 'vcp-background-service-error') {
+      let notification: Pick<VcpNotification, 'title' | 'message' | 'type'>;
+      switch (payload.service) {
+        case 'guardian':
+          notification = {
+            title: '后台保活异常',
+            message: '后台保活未能启动或维持。可继续前台使用，切到后台后连接或回复可能中断。',
+            type: 'warning',
+          };
+          break;
+        case 'helper':
+          notification = {
+            title: '流式服务启动失败',
+            message: '未能启动流式回复服务，请稍后重试。',
+            type: 'error',
+          };
+          break;
+        case 'events':
+          notification = {
+            title: '后台状态监听异常',
+            message: '无法可靠接收应用前后台状态变化，后台保活可能受影响。请保持应用在前台使用。',
+            type: 'warning',
+          };
+          break;
+        default:
+          return { silent: true };
+      }
+      return {
+        ...notification,
+        id: `vcp_background_service_error_${payload.service}`,
+        duration: 0,
+        isPreformatted: false,
+      };
+    }
+
     const syncNotificationData = payload?.data || payload;
     if (
       payload?.type === 'vcp-sync-status' ||

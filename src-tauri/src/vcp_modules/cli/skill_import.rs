@@ -1,9 +1,11 @@
 //! P4.1 Skill ZIP 两阶段导入：owned candidate、generation fence 与原子 object publish。
 
 use std::collections::BTreeSet;
+#[cfg(unix)]
 use std::ffi::CString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
+#[cfg(unix)]
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
@@ -755,11 +757,11 @@ fn validate_archive_path(value: &str) -> Result<PathBuf, SkillError> {
 
 fn validate_archive_kind(file: &zip::read::ZipFile<'_, File>) -> Result<(), SkillError> {
     if let Some(mode) = file.unix_mode() {
-        let kind = mode & libc::S_IFMT;
+        let kind = mode & libc::S_IFMT as u32;
         let expected = if file.is_dir() {
-            libc::S_IFDIR
+            libc::S_IFDIR as u32
         } else {
-            libc::S_IFREG
+            libc::S_IFREG as u32
         };
         if kind != 0 && kind != expected {
             return Err(SkillError::integrity(

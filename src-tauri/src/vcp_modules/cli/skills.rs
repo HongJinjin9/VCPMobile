@@ -1,8 +1,12 @@
 //! Skill catalog 的安全路径与有界读取原语；绝不自动注入模型提示词。
 
+#[cfg(unix)]
 use std::ffi::CString;
+#[cfg(unix)]
 use std::fs::File;
+#[cfg(unix)]
 use std::io::{self, Read};
+#[cfg(unix)]
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
@@ -116,13 +120,6 @@ fn open_directory_nofollow(path: &Path) -> Result<OwnedFd, SkillError> {
     Ok(unsafe { OwnedFd::from_raw_fd(descriptor) })
 }
 
-#[cfg(not(unix))]
-fn open_directory_nofollow(_path: &Path) -> Result<OwnedFd, SkillError> {
-    Err(SkillError::integrity(
-        "secure Skill access is unavailable on this host",
-    ))
-}
-
 #[cfg(unix)]
 fn open_directory_at(parent: &OwnedFd, name: &std::ffi::OsStr) -> Result<OwnedFd, SkillError> {
     let name = CString::new(name.as_bytes())
@@ -192,6 +189,7 @@ fn open_regular_file_at(
     Ok(File::from(descriptor))
 }
 
+#[cfg(unix)]
 fn read_resource_from_fd_bounded(
     root: &OwnedFd,
     skill_id: &str,
@@ -224,6 +222,7 @@ fn read_resource_from_fd_bounded(
     Ok(bytes)
 }
 
+#[cfg(unix)]
 pub(super) fn read_catalog_resource(
     catalog_root: &Path,
     object_id: &str,
@@ -234,6 +233,18 @@ pub(super) fn read_catalog_resource(
     validate_skill_id(object_id)?;
     let relative = validate_resource_path(resource_path)?;
     read_resource_from_fd_bounded(&root_fd, object_id, &relative, max_bytes)
+}
+
+#[cfg(not(unix))]
+pub(super) fn read_catalog_resource(
+    _catalog_root: &Path,
+    _object_id: &str,
+    _resource_path: &str,
+    _max_bytes: usize,
+) -> Result<Vec<u8>, SkillError> {
+    Err(SkillError::integrity(
+        "secure Skill access is unavailable on this host",
+    ))
 }
 
 pub(super) fn parse_skill_name(text: &str) -> Option<String> {

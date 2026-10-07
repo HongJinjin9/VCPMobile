@@ -1132,7 +1132,7 @@ async fn connect_to_helper<R: Runtime>(
     log::info!(
         "[VCPClient] Helper not responding or port file missing. Starting/Waking helper service..."
     );
-    let _ = tauri_plugin_vcp_mobile::stream::start_helper_service(app.clone());
+    tauri_plugin_vcp_mobile::stream::start_helper_service(app.clone())?;
 
     // 3. 循环等待新端口文件并尝试连接（最多尝试 60 次，每次间隔 50ms，总计 3 秒超时）
     let mut last_err = String::new();
@@ -1190,11 +1190,13 @@ async fn connect_to_helper<R: Runtime>(
         }
     }
 
-    Err(format!(
+    let error = format!(
         "Failed to connect to sse helper after {}s (last error: {})",
         (max_attempts as f32 * 0.05),
         last_err
-    ))
+    );
+    tauri_plugin_vcp_mobile::events::report_service_failure(app, "helper", &error);
+    Err(error)
 }
 
 // 辅助函数：向已连接的 TcpStream 发送 JSON 指令

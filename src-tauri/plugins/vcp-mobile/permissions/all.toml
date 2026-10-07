@@ -4,8 +4,6 @@ description = "Allow all commands in vcp-mobile plugin"
 commands.allow = [
     "set_keep_screen_on",
     "clear_keep_screen_on",
-    "start_streaming_service",
-    "stop_streaming_service",
     "start_helper_service",
     "check_all_permissions",
     "request_android_permission",

@@ -6,7 +6,7 @@ plugins {
 android {
     namespace = "com.vcp.mobile"
     compileSdk = 36
-    ndkVersion = "29.0.13846066"
+    ndkVersion = "29.0.14206865"
 
     defaultConfig {
         minSdk = 26

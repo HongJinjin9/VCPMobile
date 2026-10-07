@@ -25,8 +25,9 @@ Rust 核心内部调用 ─> Rust 公开入口 ─┼─> PluginHandle / JNI
 | 路径 | 职责 |
 | ---- | ---- |
 | `src/lib.rs` | 组合插件、注册前端可调用命令、注入 `VcpMobileState` |
+| `src/events.rs` | Rust 原生 Channel 订阅、生命周期/网络事件类型、后台服务失败通知与有界待取快照 |
 | `src/screen.rs` | 经 WebView JNI 进入 `ScreenKeepOnArbiter` |
-| `src/stream.rs` | 暴露前台保活与 helper service 的 Rust 边界 |
+| `src/stream.rs` | 请求独立的前台保活租约与 helper service 的 Rust 边界 |
 | `src/system.rs` | 承接权限、文件、设备状态、更新与系统能力调用 |
 | `src/cli.rs` | 承接 Rust 核心到 Android CLI process / PTY 的异步桥接 |
 | `android/src/main/.../VcpMobilePlugin.kt` | Kotlin 命令入口与插件 attach/destroy 编排 |

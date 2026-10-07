@@ -1037,58 +1037,6 @@ Denies the start_network_monitoring command without any pre-configured scope.
 <tr>
 <td>
 
-`vcp-mobile:allow-start-streaming-service`
-
-</td>
-<td>
-
-Enables the start_streaming_service command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`vcp-mobile:deny-start-streaming-service`
-
-</td>
-<td>
-
-Denies the start_streaming_service command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`vcp-mobile:allow-stop-streaming-service`
-
-</td>
-<td>
-
-Enables the stop_streaming_service command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-`vcp-mobile:deny-stop-streaming-service`
-
-</td>
-<td>
-
-Denies the stop_streaming_service command without any pre-configured scope.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
 `vcp-mobile:allow-update-download-notification`
 
 </td>

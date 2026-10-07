@@ -12,6 +12,7 @@ use crate::vcp_modules::vcp_client::{
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tauri::{ipc::Channel, AppHandle, State};
+use tauri_plugin_vcp_mobile::stream::{ForegroundLease, ForegroundTask};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -139,13 +140,10 @@ pub async fn internal_process_agent_chat_message(
     )
     .await?;
 
-    // All fallible preparation and owner creation are complete before acquiring foreground
-    // service state, so every later model/coordinator outcome reaches the paired stop below.
-    if let Err(error) =
-        tauri_plugin_vcp_mobile::stream::start_stream_service_inner(&app_handle, &agent_config.name)
-    {
-        log::warn!("[AgentChatAppService] Failed to start streaming service: {error}");
-    }
+    // A separate lease per operation also releases on cancellation of this future.
+    // Acquisition reports native failure through the shared notification channel.
+    let foreground_lease =
+        ForegroundLease::acquire(&app_handle, ForegroundTask::Stream, &agent_config.name).ok();
 
     // 在发起 VCP 请求前，向前端发射 thinking 事件以初始化气泡
     let _ = stream_channel.send(StreamEvent::thinking(thinking_id.clone(), context.clone()));
@@ -170,13 +168,8 @@ pub async fn internal_process_agent_chat_message(
     .await;
 
     // 9. 停止前台服务
-    if let Err(e) =
-        tauri_plugin_vcp_mobile::stream::stop_stream_service_inner(&app_handle, &agent_config.name)
-    {
-        log::warn!(
-            "[AgentChatAppService] Failed to stop streaming service: {}",
-            e
-        );
+    if let Some(lease) = foreground_lease {
+        let _ = lease.release();
     }
 
     // 8. 流式结束后（含中断），将最终内容委派统一的 Finalizer 进行存盘与事件分发
@@ -253,14 +246,8 @@ pub async fn handle_assistant_chat_stream(
         read_agent_config_internal(&app_handle, &agent_state, &agent_id, Some(true)).await?;
 
     // 2. 启动前台服务保活
-    if let Err(e) =
-        tauri_plugin_vcp_mobile::stream::start_stream_service_inner(&app_handle, &agent_config.name)
-    {
-        log::warn!(
-            "[AssistantChatAppService] Failed to start streaming service early: {}",
-            e
-        );
-    }
+    let foreground_lease =
+        ForegroundLease::acquire(&app_handle, ForegroundTask::Stream, &agent_config.name).ok();
 
     // 3. 构造请求消息数组 (注入 System Prompt)
     let mut messages: Vec<Value> = Vec::new();
@@ -330,13 +317,8 @@ pub async fn handle_assistant_chat_stream(
     .await;
 
     // 6. 停止前台服务
-    if let Err(e) =
-        tauri_plugin_vcp_mobile::stream::stop_stream_service_inner(&app_handle, &agent_config.name)
-    {
-        log::warn!(
-            "[AssistantChatAppService] Failed to stop streaming service: {}",
-            e
-        );
+    if let Some(lease) = foreground_lease {
+        let _ = lease.release();
     }
 
     // 7. 处理请求结果并补发流终结事件

@@ -2,9 +2,12 @@ package com.vcp.mobile
 
 import android.app.Activity
 import android.content.res.Configuration
-import android.webkit.WebView
+import android.os.Handler
+import android.os.Looper
 import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ProcessLifecycleOwner
 import app.tauri.plugin.JSObject
 import java.lang.ref.WeakReference
 import java.util.concurrent.atomic.AtomicLong
@@ -12,41 +15,45 @@ import java.util.concurrent.atomic.AtomicLong
 /**
  * 应用生命周期桥接器
  *
- * 通过 DefaultLifecycleObserver 自动监听 Activity 生命周期，
- * 使用 evaluateJavascript 直接注入 window.CustomEvent，保持与前端 window.addEventListener 兼容。
+ * 监听进程级前后台状态，通过插件持有的原生 Channel 送到 Rust。
+ * 订阅者可读取当前快照，避免冷启动发生在 Channel 注册前的事件丢失。
  */
 class LifecycleBridge : DefaultLifecycleObserver {
 
-    private var activityRef: WeakReference<Activity>? = null
     private var pluginRef: WeakReference<VcpMobilePlugin>? = null
     private val transitionEpoch = AtomicLong(0)
     private var lastForegroundState: Boolean? = null
 
     fun attach(activity: Activity, plugin: VcpMobilePlugin) {
-        activityRef = WeakReference(activity)
         pluginRef = WeakReference(plugin)
-        // 升级为进程级生命周期监听，完美防抖，免疫 Activity 重建与切换
+        // ProcessLifecycleOwner 合并 Activity 切换，避免短暂重建触发后台保活。
         activity.runOnUiThread {
-            androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.addObserver(this)
+            if (pluginRef?.get() === plugin) {
+                ProcessLifecycleOwner.get().lifecycle.addObserver(this)
+            }
         }
     }
 
     fun detach() {
-        val activity = activityRef?.get()
-        if (activity != null) {
-            activity.runOnUiThread {
-                try {
-                    androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.removeObserver(this)
-                } catch (_: Exception) {}
-            }
-        } else {
-            try {
-                androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.removeObserver(this)
-            } catch (_: Exception) {}
-        }
-        activityRef = null
         pluginRef = null
         lastForegroundState = null
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            ProcessLifecycleOwner.get().lifecycle.removeObserver(this)
+        } else {
+            Handler(Looper.getMainLooper()).post {
+                ProcessLifecycleOwner.get().lifecycle.removeObserver(this)
+            }
+        }
+    }
+
+    /** 必须在主线程与 observer 回调、Channel 注册一起串行调用。 */
+    fun snapshot(): JSObject {
+        val foreground = lastForegroundState
+            ?: ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+        return JSObject().apply {
+            put("state", if (foreground) "resume" else "pause")
+            put("epoch", transitionEpoch.get())
+        }
     }
 
     override fun onDestroy(owner: LifecycleOwner) {
@@ -99,7 +106,7 @@ class LifecycleBridge : DefaultLifecycleObserver {
                     is Long -> triggerData.put(key, value)
                 }
             }
-            plugin.trigger("lifecycle", triggerData)
+            plugin.emitNativeEvent("lifecycle", triggerData)
         }
     }
 }

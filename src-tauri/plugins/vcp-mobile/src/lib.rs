@@ -4,6 +4,7 @@ use tauri::{
 };
 
 pub mod cli;
+pub mod events;
 mod screen;
 pub mod stream;
 pub mod system;
@@ -34,8 +35,6 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
         .invoke_handler(tauri::generate_handler![
             screen::set_keep_screen_on,
             screen::clear_keep_screen_on,
-            stream::start_streaming_service,
-            stream::stop_streaming_service,
             stream::acquire_foreground,
             stream::release_foreground,
             stream::start_helper_service,
@@ -78,6 +77,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             system::release_ota_keepalive,
         ])
         .setup(|app, _api| {
+            app.manage(events::PendingServiceFailures::default());
             #[cfg(target_os = "android")]
             let plugin_handle =
                 _api.register_android_plugin("com.vcp.mobile", "VcpMobilePlugin")?;

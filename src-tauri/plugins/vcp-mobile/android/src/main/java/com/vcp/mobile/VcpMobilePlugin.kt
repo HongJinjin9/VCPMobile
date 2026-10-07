@@ -34,6 +34,7 @@ import androidx.core.content.ContextCompat
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.JSArray
 import app.tauri.plugin.Invoke
+import app.tauri.plugin.Channel
 import com.vcp.mobile.cli.CancelCliProcessArgs
 import com.vcp.mobile.cli.CloseCliPtyArgs
 import com.vcp.mobile.cli.CliPtyHostOwner
@@ -363,7 +364,9 @@ class VcpMobilePlugin(private val activity: Activity) : Plugin(activity) {
     private var cameraTempFile: java.io.File? = null
     private var networkCallback: android.net.ConnectivityManager.NetworkCallback? = null
     private var lastConnected: Boolean? = null
+    private var lastDefaultNetwork: android.net.Network? = null
     private var isNetworkMonitoringStarted = false
+    private var nativeEventChannel: Channel? = null
 
     // ==================================================================
     // SSE Proxy Service Binder & IPC (Messenger)
@@ -1099,74 +1102,6 @@ class VcpMobilePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
-    fun startStreamingService(invoke: Invoke) {
-        try {
-            val args = invoke.parseArgs(StartStreamArgs::class.java)
-            val hasKeepaliveParam = args.isKeepaliveMode != null
-            val isKeepalive = args.isKeepaliveMode ?: false
-
-            if (args.agentName.isEmpty()) {
-                if (hasKeepaliveParam) {
-                    if (!isKeepalive) {
-                        com.vcp.mobile.service.ForegroundGuardian.release(activity, "distributed")
-                    } else {
-                        val generation = com.vcp.mobile.service.ForegroundGuardian.acquire(
-                            activity, "distributed", 
-                            com.vcp.mobile.service.ForegroundGuardian.PRIORITY_DISTRIBUTED, 
-                            "distributed"
-                        )
-                        resolveWhenGuardianReady(invoke, generation)
-                        return
-                    }
-                } else {
-                    // 老版 Rust 停止信号：释放所有流式相关的默认锁
-                    com.vcp.mobile.service.ForegroundGuardian.release(activity, "sync")
-                    com.vcp.mobile.service.ForegroundGuardian.release(activity, "prerender")
-                    com.vcp.mobile.service.ForegroundGuardian.release(activity, "stream_default")
-                }
-                invoke.resolve()
-                return
-            }
-
-            val generation = if (args.agentName.contains("[数据同步]")) {
-                com.vcp.mobile.service.ForegroundGuardian.acquire(
-                    activity, "sync", 
-                    com.vcp.mobile.service.ForegroundGuardian.PRIORITY_SYNC, 
-                    args.agentName, true
-                )
-            } else if (args.agentName.contains("[预渲染重建]")) {
-                com.vcp.mobile.service.ForegroundGuardian.acquire(
-                    activity, "prerender", 
-                    com.vcp.mobile.service.ForegroundGuardian.PRIORITY_PRERENDER, 
-                    args.agentName, true
-                )
-            } else {
-                com.vcp.mobile.service.ForegroundGuardian.acquire(
-                    activity, "stream:${args.agentName}", 
-                    com.vcp.mobile.service.ForegroundGuardian.PRIORITY_STREAM, 
-                    args.agentName, false
-                )
-            }
-
-            resolveWhenGuardianReady(invoke, generation)
-        } catch (e: Exception) {
-            Log.e(TAG, "startStreamingService failed", e)
-            invoke.reject(e.message ?: "Unknown error")
-        }
-    }
-
-    @Command
-    fun stopStreamingService(invoke: Invoke) {
-        try {
-            com.vcp.mobile.service.ForegroundGuardian.releaseNonCliConsumers(activity)
-            invoke.resolve()
-        } catch (e: Exception) {
-            Log.e(TAG, "stopStreamingService failed", e)
-            invoke.reject(e.message ?: "Unknown error")
-        }
-    }
-
-    @Command
     fun acquireWakeLock(invoke: Invoke) {
         try {
             val generation = com.vcp.mobile.service.ForegroundGuardian.acquire(
@@ -1219,44 +1154,90 @@ class VcpMobilePlugin(private val activity: Activity) : Plugin(activity) {
     // Plugin Lifecycle
     // ==================================================================
 
-    private fun emitNetworkStatusToWebView() {
-        val status = networkStatusManager.getNetworkStatus()
-        val connected = status.optBoolean("connected", false)
-        if (connected != lastConnected) {
-            lastConnected = connected
-            trigger("vcp-network-status-changed", status)
+    /** 原生 Channel 直达 Rust；主线程串行订阅、快照和后续事件。 */
+    internal fun emitNativeEvent(event: String, payload: JSObject) {
+        activity.runOnUiThread {
+            if (isDestroying.get()) return@runOnUiThread
+            nativeEventChannel?.send(JSObject().apply {
+                put("event", event)
+                put("payload", payload)
+            })
         }
     }
 
     @Command
-    fun startNetworkMonitoring(invoke: Invoke) {
-        if (isNetworkMonitoringStarted) {
-            invoke.resolve()
-            return
-        }
+    fun registerNativeEvents(invoke: Invoke) {
         try {
-            val cm = activity.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
-            val request = android.net.NetworkRequest.Builder()
-                .addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                .build()
-            networkCallback = object : android.net.ConnectivityManager.NetworkCallback() {
-                override fun onAvailable(network: android.net.Network) {
-                    emitNetworkStatusToWebView()
+            val args = invoke.parseArgs(RegisterNativeEventsArgs::class.java)
+            activity.runOnUiThread {
+                if (isDestroying.get()) {
+                    invoke.reject("plugin was destroyed")
+                    return@runOnUiThread
                 }
-                override fun onLost(network: android.net.Network) {
-                    emitNetworkStatusToWebView()
-                }
-                override fun onCapabilitiesChanged(network: android.net.Network, networkCapabilities: android.net.NetworkCapabilities) {
-                    emitNetworkStatusToWebView()
+                try {
+                    // 每次注册替换唯一订阅者；快照与实时事件不经过 WebView JS。
+                    nativeEventChannel = args.channel
+                    emitNativeEvent("lifecycle", lifecycleBridge.snapshot())
+                    startNetworkMonitoringInternal()
+                    emitNetworkStatus(force = true)
+                    invoke.resolve()
+                } catch (error: Exception) {
+                    Log.e(TAG, "Failed to register native events", error)
+                    invoke.reject(error.message ?: "Failed to register native events")
                 }
             }
-            cm.registerNetworkCallback(request, networkCallback!!)
-            isNetworkMonitoringStarted = true
-            Log.i(TAG, "[Network] Native network status monitoring started successfully.")
-            invoke.resolve()
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to register network callback", e)
-            invoke.reject(e.message ?: "Failed to register network callback")
+        } catch (error: Exception) {
+            invoke.reject(error.message ?: "Invalid native event registration")
+        }
+    }
+
+    private fun emitNetworkStatus(force: Boolean = false) {
+        if (isDestroying.get()) return
+        val cm = activity.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        val network = cm.activeNetwork
+        val status = networkStatusManager.getNetworkStatus()
+        val connected = status.optBoolean("connected", false)
+        if (force || connected != lastConnected || network != lastDefaultNetwork) {
+            lastConnected = connected
+            lastDefaultNetwork = network
+            emitNativeEvent("network", status)
+        }
+    }
+
+    private fun startNetworkMonitoringInternal() {
+        if (isNetworkMonitoringStarted) return
+        val cm = activity.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        val callback = object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: android.net.Network) {
+                emitNetworkStatus()
+            }
+            override fun onLost(network: android.net.Network) {
+                emitNetworkStatus()
+            }
+            override fun onCapabilitiesChanged(network: android.net.Network, networkCapabilities: android.net.NetworkCapabilities) {
+                emitNetworkStatus()
+            }
+        }
+        cm.registerDefaultNetworkCallback(callback, Handler(Looper.getMainLooper()))
+        networkCallback = callback
+        isNetworkMonitoringStarted = true
+        Log.i(TAG, "[Network] Native default network monitoring started.")
+    }
+
+    @Command
+    fun startNetworkMonitoring(invoke: Invoke) {
+        activity.runOnUiThread {
+            if (isDestroying.get()) {
+                invoke.reject("plugin was destroyed")
+                return@runOnUiThread
+            }
+            try {
+                startNetworkMonitoringInternal()
+                invoke.resolve()
+            } catch (error: Exception) {
+                Log.e(TAG, "Failed to register network callback", error)
+                invoke.reject(error.message ?: "Failed to register network callback")
+            }
         }
     }
 
@@ -1361,6 +1342,7 @@ class VcpMobilePlugin(private val activity: Activity) : Plugin(activity) {
 
     override fun onDestroy(activity: AppCompatActivity) {
         isDestroying.set(true)
+        nativeEventChannel = null
         oomGuardFuture?.cancel(true)
         oomGuardFuture = null
         sensorStatusManager.shutdown()
@@ -3007,9 +2989,8 @@ class VcpMobilePlugin(private val activity: Activity) : Plugin(activity) {
 }
 
 @InvokeArg
-class StartStreamArgs {
-    lateinit var agentName: String
-    var isKeepaliveMode: Boolean? = null
+class RegisterNativeEventsArgs {
+    lateinit var channel: Channel
 }
 
 @InvokeArg

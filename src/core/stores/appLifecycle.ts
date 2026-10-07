@@ -14,6 +14,7 @@ import type {
   PermissionStatusDto,
 } from '../types/native';
 import { bootMark, reportBootTrace, trackBootStage } from '../utils/bootTrace';
+import { useNotificationProcessor } from '../composables/useNotificationProcessor';
 
 export type AppState = 'PERMISSIONS' | 'BOOTING' | 'CONNECTING' | 'PRELOADING' | 'READY' | 'ERROR' | 'OPTIMIZING';
 
@@ -34,6 +35,7 @@ interface SystemSnapshotDto {
   log: Extract<VcpStatus['status'], 'closed' | 'connecting' | 'connected' | 'error'>;
   sync: string;
   databaseRecovery: DatabaseRecoveryNotice | null;
+  backgroundServiceFailures: Array<'guardian' | 'helper' | 'events'>;
 }
 
 
@@ -55,6 +57,7 @@ export const useAppLifecycleStore = defineStore('appLifecycle', () => {
   const settingsStore = useSettingsStore();
   const themeStore = useThemeStore();
   const notificationStore = useNotificationStore();
+  const { processPayload } = useNotificationProcessor();
   const avatarStore = useAvatarStore();
 
   let bootstrapPromise: Promise<void> | null = null;
@@ -280,6 +283,10 @@ export const useAppLifecycleStore = defineStore('appLifecycle', () => {
     try {
       console.log('[Lifecycle] Fetching system status snapshot...');
       const snapshot = await invoke<SystemSnapshotDto>('get_system_snapshot');
+
+      for (const service of snapshot.backgroundServiceFailures) {
+        notificationStore.addNotification(processPayload({ type: 'vcp-background-service-error', service }));
+      }
       
       // 同步到 Notification Store (唯一真相源)
       notificationStore.updateCoreStatus({
@@ -348,8 +355,15 @@ export const useAppLifecycleStore = defineStore('appLifecycle', () => {
             return;
           }
         } catch (e) {
-          // 非 Android host（桌面开发/测试）无系统权限概念，直接放行
-          console.warn('[Lifecycle] Permission check unavailable, skipping gate:', e);
+          // 权限检查异常时仍允许前台使用，以常驻通知说明后台能力尚未确认。
+          console.warn('[Lifecycle] Permission check unavailable, continuing with warning:', e);
+          notificationStore.addNotification({
+            id: 'startup_permission_check_failed',
+            title: '启动权限检查未完成',
+            message: '已继续进入应用，可保持前台使用。后台流式回复和连接保活可能受影响，请检查系统中的通知权限、通知访问权限与电池后台设置。',
+            type: 'warning',
+            duration: 0,
+          });
         }
 
         setState('BOOTING', '开始前端主线程启动编排');

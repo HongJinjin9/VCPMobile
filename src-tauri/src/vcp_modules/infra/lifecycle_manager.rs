@@ -286,17 +286,52 @@ pub async fn bootstrap(app: &AppHandle) -> Result<(), String> {
     info!("[Lifecycle] Bootstrap complete. Core is READY.");
     crate::vcp_modules::boot_trace::boot_mark(&handle, "rs:core_ready");
 
-    // 6. 核心就绪后，安全地激活安卓原生网络监听，彻底规避冷启动 JNI WebView 未就绪的死锁与崩塌
-    let handle_net = handle.clone();
-    tauri::async_runtime::spawn(async move {
-        log::info!("[Lifecycle] Activating Android native network status monitoring...");
-        if let Err(e) = tauri_plugin_vcp_mobile::system::start_network_monitoring(handle_net) {
-            log::error!(
-                "[Lifecycle] Failed to start native network status monitoring: {}",
-                e
-            );
-        }
-    });
+    // 原生 Channel 在状态 owner 就绪后安装；订阅时回放当前状态，补齐冷启动期间的变化。
+    #[cfg(target_os = "android")]
+    {
+        let handle_net = handle.clone();
+        tauri::async_runtime::spawn(async move {
+            let event_handle = handle_net.clone();
+            if let Err(error) =
+                tauri_plugin_vcp_mobile::events::subscribe(&handle_net, move |event| {
+                    use tauri_plugin_vcp_mobile::events::{NativeEvent, NativeLifecycleState};
+                    // JNI 回调只安排任务，不在 Android 主线程等待原生命令返回。
+                    match event {
+                        NativeEvent::Lifecycle { state } => {
+                            let foreground = match state {
+                                NativeLifecycleState::Resume => true,
+                                NativeLifecycleState::Pause | NativeLifecycleState::Stop => false,
+                                NativeLifecycleState::Other => return,
+                            };
+                            let epoch = reserve_lifecycle_transition();
+                            let app = event_handle.clone();
+                            tauri::async_runtime::spawn(async move {
+                                set_app_foreground_state_for_epoch(app, foreground, epoch).await;
+                            });
+                        }
+                        NativeEvent::Network { connected: true } => {
+                            let app = event_handle.clone();
+                            tauri::async_runtime::spawn(async move {
+                                if let Some(state) =
+                                    app.try_state::<crate::distributed::DistributedState>()
+                                {
+                                    state.client.read().await.trigger_reconnect().await;
+                                }
+                            });
+                        }
+                        NativeEvent::Network { connected: false } => {}
+                    }
+                })
+                .await
+            {
+                tauri_plugin_vcp_mobile::events::report_service_failure(
+                    &handle_net,
+                    "events",
+                    &error,
+                );
+            }
+        });
+    }
 
     Ok(())
 }
@@ -310,6 +345,8 @@ pub struct SystemSnapshot {
     #[serde(rename = "databaseRecovery")]
     pub database_recovery:
         Option<crate::vcp_modules::infra::lifecycle_state::DatabaseRecoveryNotice>,
+    #[serde(rename = "backgroundServiceFailures")]
+    pub background_service_failures: Vec<tauri_plugin_vcp_mobile::events::ServiceFailure>,
 }
 
 #[tauri::command]
@@ -336,6 +373,7 @@ pub async fn get_system_snapshot(
         log,
         sync,
         database_recovery,
+        background_service_failures: tauri_plugin_vcp_mobile::events::take_service_failures(&app),
     })
 }
 

@@ -217,6 +217,67 @@ class ForegroundGuardianTest {
     }
 
     @Test
+    fun sameNamedStreamsKeepIndependentLeasesUntilBothFinish() {
+        val first = ForegroundGuardian.acquire(
+            context, "stream:101", ForegroundGuardian.PRIORITY_STREAM, "Nova", false, 0,
+        )
+        val second = ForegroundGuardian.acquire(
+            context, "stream:102", ForegroundGuardian.PRIORITY_STREAM, "Nova", false, 0,
+        )
+        ForegroundGuardian.onServiceReady(first)
+        ForegroundGuardian.onServiceReady(second)
+
+        ForegroundGuardian.release(context, "stream:101")
+        assertTrue(ForegroundGuardian.isActive)
+        assertEquals("Nova", ForegroundGuardian.getNotificationLabel())
+
+        // Repeated/late cleanup of the completed request cannot stop its peer.
+        ForegroundGuardian.release(context, "stream:101")
+        assertTrue(ForegroundGuardian.isActive)
+
+        ForegroundGuardian.release(context, "stream:102")
+        assertFalse(ForegroundGuardian.isActive)
+    }
+
+    @Test
+    fun expiredStreamCleanupCannotReleaseLaterSameNamedRequest() {
+        val first = ForegroundGuardian.acquire(
+            context, "stream:201", ForegroundGuardian.PRIORITY_STREAM, "Nova", false, 1,
+        )
+        ForegroundGuardian.onServiceReady(first)
+        shadowOf(Looper.getMainLooper()).idleFor(2, TimeUnit.MILLISECONDS)
+        assertFalse(ForegroundGuardian.isActive)
+
+        val second = ForegroundGuardian.acquire(
+            context, "stream:202", ForegroundGuardian.PRIORITY_STREAM, "Nova", false, 0,
+        )
+        ForegroundGuardian.onServiceReady(second)
+        ForegroundGuardian.release(context, "stream:201")
+        assertTrue(ForegroundGuardian.isActive)
+
+        ForegroundGuardian.release(context, "stream:202")
+        assertFalse(ForegroundGuardian.isActive)
+    }
+
+    @Test
+    fun syncAndPrerenderOperationTagsRetainTheirThirtyMinuteBudget() {
+        for (tag in listOf("sync:301", "prerender:302")) {
+            val generation = ForegroundGuardian.acquire(
+                context, tag, ForegroundGuardian.PRIORITY_SYNC, "background work", true,
+            )
+            ForegroundGuardian.onServiceReady(generation)
+
+            shadowOf(Looper.getMainLooper()).idleFor(16, TimeUnit.MINUTES)
+            assertTrue("$tag must retain its own budget", ForegroundGuardian.isActive)
+            assertTrue(ForegroundGuardian.isScreenKeepOnRequired)
+
+            shadowOf(Looper.getMainLooper()).idleFor(15, TimeUnit.MINUTES)
+            assertFalse(ForegroundGuardian.isActive)
+            assertFalse(ForegroundGuardian.isScreenKeepOnRequired)
+        }
+    }
+
+    @Test
     fun staleServiceDestroyCannotClearNewGeneration() {
         val firstGeneration = ForegroundGuardian.acquire(
             context, "stream:first", ForegroundGuardian.PRIORITY_STREAM, "first", false, 0,

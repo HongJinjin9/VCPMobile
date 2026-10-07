@@ -4,9 +4,7 @@ mod commands;
 mod distributed;
 mod vcp_modules;
 
-const DISTRIBUTED_NETWORK_EVENT: &str = "vcp-mobile://vcp-network-status-changed";
-
-use tauri::{Listener, Manager};
+use tauri::Manager;
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
 // 命令 handler 的导入全部位于 commands.rs；此处仅保留启动编排所需的状态与函数。
 use vcp_modules::cli::MobileCliRuntimeState;
@@ -75,51 +73,6 @@ pub fn run() {
                     });
                 }
             });
-
-            // 3. 监听安卓原生网络状态变更，实现分布式连接的自主重连
-            let handle_net = app.handle().clone();
-            app.listen_any(DISTRIBUTED_NETWORK_EVENT, move |event| {
-                if let Ok(payload) = serde_json::from_str::<serde_json::Value>(event.payload()) {
-                    if payload.get("connected").and_then(|v| v.as_bool()).unwrap_or(false) {
-                        let h = handle_net.clone();
-                        tauri::async_runtime::spawn(async move {
-                            if let Some(state) = h.try_state::<distributed::DistributedState>() {
-                                log::info!("[Distributed] Network restored! Triggering immediate reconnect in Rust backend.");
-                                let client = state.client.read().await;
-                                client.trigger_reconnect().await;
-                            }
-                        });
-                    }
-                }
-            });
-
-
-
-            // 5. 监听由 Kotlin LifecycleBridge 发回的原生进程级生命周期事件
-            #[cfg(any(target_os = "android", target_os = "ios"))]
-            {
-                let handle_lifecycle = app.handle().clone();
-                app.listen_any("vcp-mobile://lifecycle", move |event| {
-                    if let Ok(payload) = serde_json::from_str::<serde_json::Value>(event.payload()) {
-                        if let Some(state) = payload.get("state").and_then(|v| v.as_str()) {
-                            let handle = handle_lifecycle.clone();
-                            if state == "pause" || state == "stop" {
-                                log::info!("[Lifecycle] App entered background (state={})", state);
-                                let epoch = vcp_modules::lifecycle_manager::reserve_lifecycle_transition();
-                                tauri::async_runtime::spawn(async move {
-                                    vcp_modules::lifecycle_manager::set_app_foreground_state_for_epoch(handle, false, epoch).await;
-                                });
-                            } else if state == "resume" {
-                                log::info!("[Lifecycle] App entered foreground (state={})", state);
-                                let epoch = vcp_modules::lifecycle_manager::reserve_lifecycle_transition();
-                                tauri::async_runtime::spawn(async move {
-                                    vcp_modules::lifecycle_manager::set_app_foreground_state_for_epoch(handle, true, epoch).await;
-                                });
-                            }
-                        }
-                    }
-                });
-            }
 
             vcp_modules::boot_trace::boot_mark(app.handle(), "rs:setup_end");
             Ok(())
@@ -192,20 +145,6 @@ pub fn run() {
 
 #[cfg(test)]
 mod contract_tests {
-    use super::DISTRIBUTED_NETWORK_EVENT;
-
-    #[test]
-    fn distributed_network_listener_matches_android_plugin_namespace() {
-        let kotlin_plugin = include_str!(
-            "../plugins/vcp-mobile/android/src/main/java/com/vcp/mobile/VcpMobilePlugin.kt"
-        );
-        assert!(kotlin_plugin.contains("trigger(\"vcp-network-status-changed\""));
-        assert_eq!(
-            DISTRIBUTED_NETWORK_EVENT,
-            "vcp-mobile://vcp-network-status-changed"
-        );
-    }
-
     #[test]
     fn distributed_tool_authorization_command_uses_enabled_allowlist() {
         // 命令注册表位于 commands.rs（lib.rs 仅保留启动编排）。
