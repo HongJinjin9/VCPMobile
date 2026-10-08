@@ -6,13 +6,15 @@
 
 ## 分期实施工作区（2026-10-08 启动）
 
-本目录 00–09 保留专题研究。每个 Phase 使用独立目录，在阶段启动时按当时生产代码重新形成子规划、审计和验收记录；Phase 0/1 已完成，Phase 2–6 当前仅建立工作入口。
+2026-10-08 后续决定：用户暂停 iOS 兼容开发与 G1，先进行 [Tauri 2.12 升级评估与实施](../tauri-2.12-upgrade/README.md)。以下 Phase 2 成果保留，旧依赖的通过项不作为升级后证据。
+
+本目录 00–09 保留专题研究。每个 Phase 使用独立目录，在阶段启动时按当时生产代码重新形成子规划、审计和验收记录；Phase 0/1 已完成，Phase 2 源码与本地验证已完成、G1 待执行，Phase 3–6 仍为阶段入口。
 
 | 工作区 | 当前职责 |
 |---|---|
 | [Phase 0](./phase-0/README.md) | 已完成输入与目标源码审计；具体证据和后续问题见阶段验收记录 |
 | [Phase 1](./phase-1/README.md) | 已完成平台能力、cfg/ACL、目录与生命周期契约；验证与下一阶段输入见阶段 07 |
-| [Phase 2](./phase-2/README.md) | Swift 插件、Channel、生命周期与 G1 |
+| [Phase 2](./phase-2/README.md) | 已接入 Swift、Channel、生命周期与可重放工程；本地检查通过，G1 Apple 构建待执行 |
 | [Phase 3](./phase-3/README.md) | 前台核心 |
 | [Phase 4](./phase-4/README.md) | 原生文件/图片与 WebKit 交互 |
 | [Phase 5](./phase-5/README.md) | 尽力后台与单次终态 |

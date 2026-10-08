@@ -162,7 +162,8 @@ fn status_for(platform: Platform, name: CapabilityName) -> CapabilityStatus {
         // Host scaffold is for development; its fixture values are never product capabilities.
         Platform::Host => false,
     };
-    let implemented = platform == Platform::Android;
+    let implemented = platform == Platform::Android
+        || (platform == Platform::Ios && name == CapabilityName::Lifecycle);
     let needs_authorization = matches!(
         name,
         AndroidPermissionGate
@@ -219,16 +220,57 @@ pub fn require_capability(name: CapabilityName) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-pub fn get_platform_capabilities() -> Result<PlatformCapabilities, String> {
-    let platform = current_platform();
-    Ok(PlatformCapabilities {
+fn platform_capabilities(platform: Platform) -> PlatformCapabilities {
+    PlatformCapabilities {
         platform,
         features: CAPABILITIES
             .into_iter()
             .map(|name| (name, status_for(platform, name)))
             .collect(),
-    })
+    }
+}
+
+#[cfg(any(target_os = "ios", test))]
+fn apply_ios_observations(
+    capabilities: &mut PlatformCapabilities,
+    observed: &tauri_plugin_vcp_mobile::ios::NativeCapabilities,
+) -> Result<(), String> {
+    use tauri_plugin_vcp_mobile::ios::NativeRuntime;
+    observed.validate()?;
+    // Phase 2 installs only the lifecycle adapter. Connectivity Channel support
+    // cannot enable the unrelated, full NetworkStatus telemetry API.
+    if let Some(lifecycle) = capabilities.features.get_mut(&CapabilityName::Lifecycle) {
+        lifecycle.implementation = if observed.lifecycle.implemented {
+            Implementation::Implemented
+        } else {
+            Implementation::NotImplemented
+        };
+        lifecycle.runtime = match observed.lifecycle.runtime {
+            NativeRuntime::Available => RuntimeAvailability::Available,
+            NativeRuntime::Unknown => RuntimeAvailability::Unknown,
+            NativeRuntime::Unavailable => RuntimeAvailability::Unavailable,
+        };
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_platform_capabilities(
+    app: tauri::AppHandle,
+) -> Result<PlatformCapabilities, String> {
+    let capabilities = platform_capabilities(current_platform());
+    #[cfg(target_os = "ios")]
+    {
+        let mut capabilities = capabilities;
+        let observed = tauri_plugin_vcp_mobile::ios::get_native_capabilities(&app).await?;
+        apply_ios_observations(&mut capabilities, &observed)?;
+        Ok(capabilities)
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = app;
+        Ok(capabilities)
+    }
 }
 
 #[cfg(test)]
@@ -258,6 +300,28 @@ mod tests {
     fn host_does_not_advertise_native_fixture_values() {
         for name in CAPABILITIES {
             assert!(!status_for(Platform::Host, name).is_implemented());
+        }
+    }
+
+    #[test]
+    fn ios_lifecycle_observation_does_not_enable_network_telemetry_or_other_adapters() {
+        let observed = serde_json::from_value(serde_json::json!({
+            "protocolVersion": 1,
+            "platform": "ios",
+            "lifecycle": { "implemented": true, "runtime": "unknown" },
+            "networkEvents": { "implemented": true, "runtime": "available" }
+        }))
+        .unwrap();
+        let mut capabilities = platform_capabilities(Platform::Ios);
+        apply_ios_observations(&mut capabilities, &observed).unwrap();
+        let lifecycle = capabilities.features[&CapabilityName::Lifecycle];
+        assert!(lifecycle.is_implemented());
+        assert_eq!(lifecycle.runtime, RuntimeAvailability::Unknown);
+        assert_eq!(lifecycle.authorization, Authorization::NotRequired);
+        for (name, status) in capabilities.features {
+            if name != CapabilityName::Lifecycle {
+                assert!(!status.is_implemented());
+            }
         }
     }
 }

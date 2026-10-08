@@ -81,7 +81,7 @@ VCPMobile/
 │   ├── Cargo.toml              # Rust 依赖与构建配置
 │   ├── tauri.conf.json         # Tauri 配置
 │   └── plugins/
-│       └── vcp-mobile/         # Android 原生插件
+│       └── vcp-mobile/         # Android 原生实现与分期接入的 iOS Swift 插件
 │           └── AGENTS.md       # 插件局部代码地图与修改闭环
 ├── docs/                       # 技术文档体系（详见 §2.1）
 │   ├── vue_docs/               # 前端知识库
@@ -123,9 +123,9 @@ VCPMobile/
 - `UI_LAYER_ARCHITECTURE.md`：全局 UI 层级规范，与 `src/core/constants/layers.ts` + `uno.config.ts` + `src/assets/themes.css` 三重机制对应
 - `MOBILE_UI_COMPATIBILITY.md`：Android 生产边界与 iOS 实验目标、共享窗口布局、分平台 CSS/Insets 与验证边界的权威规范
 
-### 2.2 Android 原生插件（`tauri-plugin-vcp-mobile`）
+### 2.2 移动端原生插件（`tauri-plugin-vcp-mobile`）
 
-`src-tauri/plugins/vcp-mobile/` 是 Android 原生能力边界。修改该子树前先读取其 [`AGENTS.md`](src-tauri/plugins/vcp-mobile/AGENTS.md)，再从当前 Rust、Kotlin、TypeScript 或 C++ 生产代码追踪实际入口与所有者。
+`src-tauri/plugins/vcp-mobile/` 是移动端原生能力边界。修改该子树前先读取其 [`AGENTS.md`](src-tauri/plugins/vcp-mobile/AGENTS.md)，再从当前 Rust、Kotlin、Swift、TypeScript 或 C++ 生产代码追踪实际入口与所有者。iOS 工程输入与 G1 脚本在 `src-tauri/ios/`；生成树仍可重建，阶段证据见对应 `phase-2/` 文档。
 
 ---
 

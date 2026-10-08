@@ -293,7 +293,7 @@ pub async fn bootstrap(app: &AppHandle) -> Result<(), String> {
     crate::vcp_modules::boot_trace::boot_mark(&handle, "rs:core_ready");
 
     // 原生 Channel 在状态 owner 就绪后安装；订阅时回放当前状态，补齐冷启动期间的变化。
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let handle_net = handle.clone();
         tauri::async_runtime::spawn(async move {
@@ -301,24 +301,38 @@ pub async fn bootstrap(app: &AppHandle) -> Result<(), String> {
             if let Err(error) =
                 tauri_plugin_vcp_mobile::events::subscribe(&handle_net, move |event| {
                     use tauri_plugin_vcp_mobile::events::NativeEvent;
-                    // JNI 回调只安排任务，不在 Android 主线程等待原生命令返回。
+                    // Native 回调只提交内存事实/安排任务，不在 UIKit/JNI 线程等待业务或原生命令。
                     match event {
                         NativeEvent::Lifecycle(event) => {
                             crate::vcp_modules::infra::lifecycle_controller::enqueue_native_lifecycle_event(
                                 event_handle.clone(), event,
                             );
                         }
-                        NativeEvent::Network { connected: true } => {
-                            let app = event_handle.clone();
-                            tauri::async_runtime::spawn(async move {
-                                if let Some(state) =
-                                    app.try_state::<crate::distributed::DistributedState>()
-                                {
-                                    state.client.read().await.trigger_reconnect().await;
-                                }
-                            });
+                        NativeEvent::Network { connected } => {
+                            #[cfg(target_os = "ios")]
+                            {
+                                // Vue reuses its existing READY/active/in-flight recovery gate.
+                                // This is an observed path fact, not a guarantee of Internet reachability.
+                                let _ = event_handle.emit(
+                                    "vcp-network-changed",
+                                    serde_json::json!({ "connected": connected }),
+                                );
+                            }
+                            #[cfg(target_os = "android")]
+                            if connected && crate::vcp_modules::infra::platform::is_implemented(
+                                crate::vcp_modules::infra::platform::CapabilityName::Distributed,
+                            ) {
+                                let app = event_handle.clone();
+                                tauri::async_runtime::spawn(async move {
+                                    if let Some(state) =
+                                        app.try_state::<crate::distributed::DistributedState>()
+                                    {
+                                        state.client.read().await.trigger_reconnect().await;
+                                    }
+                                });
+                            }
                         }
-                        NativeEvent::Network { connected: false } | NativeEvent::Other {} => {}
+                        NativeEvent::Other {} => {}
                     }
                 })
                 .await

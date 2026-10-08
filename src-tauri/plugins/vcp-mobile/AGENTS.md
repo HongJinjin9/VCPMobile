@@ -1,12 +1,12 @@
 # AGENTS.md — VCP Mobile 移动端原生插件
 
-> 本文件适用于 `src-tauri/plugins/vcp-mobile/**`。它继承仓库根规则，只补充移动端原生能力边界内的代码结构、通信路径与修改闭环；以下代码地图描述当前 Android 实现。
+> 本文件适用于 `src-tauri/plugins/vcp-mobile/**`。它继承仓库根规则，只补充移动端原生能力边界内的代码结构、通信路径与修改闭环；以下代码地图包含 Android 实现与 Phase 2 iOS 接入。
 
 ---
 
 ## 1. 子系统定位
 
-`tauri-plugin-vcp-mobile` 当前实现 VCP Mobile 的 Android 原生能力。它接收 Vue 或 Rust 核心发出的设备意图，经 Rust 插件边界进入 Kotlin、Service 或本地 CLI 宿主，再把调用结果或原生事件送回实际消费者。iOS Swift adapter 已纳入分期实施，需与 host 开发分支显式区分；当前非 Android fallback 不代表 iOS 可用，也不建立桌面产品能力。
+`tauri-plugin-vcp-mobile` 实现 VCP Mobile 的 Android 原生能力，并接入 iOS Swift 能力查询与生命周期/网络 Channel。它接收 Vue 或 Rust 核心发出的设备意图，经 Rust 插件边界进入对应原生 owner，再把调用结果或原生事件送回实际消费者。iOS 其他 adapter 继续分期实施，需与 host 开发分支显式区分；非 Android fallback 不代表 iOS 可用，也不建立桌面产品能力。
 
 Phase 1 将 Android、iOS、host 的插件分支显式隔离：iOS 尚未接通的首期能力返回 `not_implemented`，当前范围外能力返回 `unsupported`；固定状态与无副作用成功仅保留在排除 Android/iOS 的 host 开发 fixture 中。后续 adapter 只能替换对应 iOS 分支，不能借用 host 成功结果。
 
@@ -28,6 +28,8 @@ Rust 核心内部调用 ─> Rust 公开入口 ─┼─> PluginHandle / JNI
 | ---- | ---- |
 | `src/lib.rs` | 组合插件、注册前端可调用命令、注入 `VcpMobileState` |
 | `src/events.rs` | Rust 原生 Channel 订阅、生命周期/网络事件类型、后台服务失败通知与有界待取快照 |
+| `src/ios.rs` | 两条内部 Swift 调用的 DTO、协议校验与有界 receiver 保活；调用方超时/取消不丢原生接收端 |
+| `ios/Package.swift`、`ios/Sources/VcpMobilePlugin.swift` | Swift product/初始化符号、主队列 app/Scene 观察与 NWPathMonitor；不拥有业务状态 |
 | `src/screen.rs` | 经 WebView JNI 进入 `ScreenKeepOnArbiter` |
 | `src/stream.rs` | 请求独立的前台保活租约与 helper service 的 Rust 边界 |
 | `src/system.rs` | 承接权限、文件、设备状态、更新与系统能力调用 |
@@ -66,5 +68,7 @@ Rust 核心可以直接调用 `screen`、`stream`、`system` 或 `cli` 暴露的
 Rust 边界变化在 `src-tauri/` 运行 `cargo check --locked -p tauri-plugin-vcp-mobile`；涉及前端类型或跨层调用时从仓库根运行 `pnpm check`。Kotlin、Manifest 或 Service 变化还需编译实际 Android 插件目标。测试只能作为额外执行结果，不能定义生产代码应有行为。
 
 Swift 接入时同步核对 `ios_path`、SwiftPM product、初始化 binding、selector、DTO、Channel 与资源归属；UI 操作显式在主队列执行，领域状态仍归 Rust。Apple 编译/链接按根规范集中在手动 Actions G1/G2，日常源码审计记录具体目标分支与待办。
+
+当前 iOS 只在 Rust bootstrap 安装一次长期 Channel；Swift WebView 替换复用同一 Channel 并更换观察者 generation。锁定 Tauri 的原生 Channel 注册表没有删除入口，不能通过反复创建 Channel 实现重试。两条短原生请求分别最多一个在途；超时后底层任务仍接收最终回调，能力查询可在其完成后重试，真正订阅失败需重新启动 App。
 
 **完成**：实际消费者、Rust 边界、Kotlin 所有者、平台声明及返回通道保持一致，并分别说明已取得的 host、Android 构建或设备证据。

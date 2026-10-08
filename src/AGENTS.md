@@ -56,6 +56,8 @@ src/
 
 `appLifecycle.bootstrap` 先读取 `core/stores/platform.ts` 的 Rust 平台能力快照，再选择权限和原生功能入口。能力的 support/implementation 与实际 authorization/runtime 分开；查询失败由原启动 owner 重试，Feature 不以 UA 或 host fixture 推断原生功能成功。
 
+`useAppLifecycle` 将 iOS 原生 network online 与既有浏览器 online 汇入同一个流恢复 owner；iOS 在首次真实 active snapshot 前不发起恢复。卸载释放两条原生监听，迟到安装立即释放；网络路径可用只表示可以尝试对账，不表示服务端已可达。
+
 ### 3.2 Store、Composable 与组件
 
 - `core/stores/` 持有跨 Feature 或跨挂载周期状态；`features/<domain>/` 内的 Store 持有领域状态。

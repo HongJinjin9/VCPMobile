@@ -1,10 +1,14 @@
 use crate::vcp_modules::infra::lifecycle_state::{LifecycleSnapshot, LifecycleState};
+#[cfg(not(target_os = "ios"))]
 use crate::vcp_modules::settings_manager::{read_settings, SettingsState};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+#[cfg(any(not(target_os = "ios"), test))]
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(not(target_os = "ios"))]
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_vcp_mobile::events::LifecyclePhase;
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 use tauri_plugin_vcp_mobile::events::NativeLifecycleEvent;
 
 static LIFECYCLE_TRANSITION_EPOCH: AtomicU64 = AtomicU64::new(0);
@@ -18,6 +22,7 @@ fn is_transition_epoch_current(epoch: u64) -> bool {
     epoch == LIFECYCLE_TRANSITION_EPOCH.load(Ordering::SeqCst)
 }
 
+#[cfg(any(not(target_os = "ios"), test))]
 async fn lock_linger_interval(
     token: &tokio_util::sync::CancellationToken,
 ) -> Option<tokio::sync::MutexGuard<'static, ()>> {
@@ -29,6 +34,7 @@ async fn lock_linger_interval(
     }
 }
 
+#[cfg(any(not(target_os = "ios"), test))]
 fn consume_reconnect_intent(flag: &AtomicBool, was_disconnected: bool) {
     if was_disconnected {
         flag.store(false, Ordering::SeqCst);
@@ -45,7 +51,7 @@ pub fn is_app_in_foreground<R: tauri::Runtime>(app: &AppHandle<R>) -> bool {
 
 /// Native callbacks only enqueue work. Sequence rejection must precede epoch
 /// reservation, otherwise a late native event could invalidate newer work.
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub fn enqueue_native_lifecycle_event(app: AppHandle, event: NativeLifecycleEvent) {
     let epoch = {
         let Some(state) = app.try_state::<LifecycleState>() else {
@@ -122,7 +128,7 @@ async fn apply_lifecycle_transition(app: AppHandle, snapshot: LifecycleSnapshot)
         is_foreground
     );
 
-    // iOS phase input is connected in Phase 2; its bounded domain policy is Phase 3.
+    // iOS publishes the native phase through this same owner; bounded domain policy is Phase 3.
     // Android leases and linger timers must never run on the iOS branch.
     #[cfg(not(target_os = "ios"))]
     reconcile_foreground_services(&app, &state, is_foreground).await;

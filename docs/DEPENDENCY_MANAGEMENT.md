@@ -44,8 +44,8 @@ Tauri 核心组件必须**严格同版本或遵循官方发布的兼容矩阵**�
 
 | 包名 | 当前锁定版本 | 更新频率建议 | 最新版本来源 | 备注 |
 |------|-------------|-------------|-------------|------|
-| `tauri` | `2.11.5` | 跟随官方 Release Note | crates.io | 核心运行时，**必须与 CLI/API 对齐** |
-| `tauri-build` | `2.6.3` | 与 `tauri` 同步检查 | crates.io | Build script 依赖，版本独立于 tauri core |
+| `tauri` | `2.12.1` | 跟随官方 Release Note | crates.io | 核心运行时，**必须与 CLI/API 对齐** |
+| `tauri-build` | `2.7.1` | 与 `tauri` 同步检查 | crates.io | Build script 依赖，版本独立于 tauri core |
 | `tauri-plugin-log` | `2.9.0` | 每季度检查 | crates.io | 日志插件 |
 | `tauri-plugin-opener` | `2.5.4` | 每季度检查 | crates.io | 系统打开器插件 |
 | `serde` | `1` | 仅安全补丁 | crates.io | 序列化基石，极稳定 |
@@ -93,7 +93,7 @@ Tauri 核心组件必须**严格同版本或遵循官方发布的兼容矩阵**�
 
 | 包名 | 当前锁定版本 | 更新频率建议 | 最新版本来源 | 备注 |
 |------|-------------|-------------|-------------|------|
-| `@tauri-apps/api` | `2.11.1` | 与 `tauri` crate 同步 | npm | 根应用与本地插件必须保持一致 |
+| `@tauri-apps/api` | `2.12.1` | 与 `tauri` crate 同步 | npm | 根应用与本地插件必须保持一致 |
 | `@tauri-apps/plugin-opener` | `2.5.4` | 与 `tauri-plugin-opener` 同步 | npm | 插件前端绑定 |
 | `vue` | `^3.5.41` | 每月检查 | npm | 核心框架 |
 | `vue-router` | `^5.0.6` | 每月检查 | npm | 路由 |
@@ -118,7 +118,7 @@ Tauri 核心组件必须**严格同版本或遵循官方发布的兼容矩阵**�
 
 | 包名 | 当前锁定版本 | 更新频率建议 | 最新版本来源 | 备注 |
 |------|-------------|-------------|-------------|------|
-| `@tauri-apps/cli` | `2.11.4` | 与 `tauri` crate 同步 | npm | **必须与 Rust tauri 版本对齐** |
+| `@tauri-apps/cli` | `2.12.1` | 与 `tauri` crate 同步 | npm | **必须与 Rust tauri 版本对齐** |
 | `typescript` | `~5.6.3` | 每季度检查 | npm | TS 编译器 |
 | `vue-tsc` | `^2.2.12` | 与 `vue`/`typescript` 同步 | npm | Vue 类型检查 |
 | `eslint` | `^10.8.1` | 每季度检查 | npm | 代码检查 |
@@ -171,7 +171,7 @@ Tauri 核心组件必须**严格同版本或遵循官方发布的兼容矩阵**�
 
 在任何依赖升级前，必须完成以下检查：
 
-1. `git status` 确认工作区干净（无未提交修改）。
+1. 检查 `git status`，识别并保留全部已有修改。按根 `AGENTS.md` 使用已有恢复点或一次范围明确的快照；不得为升级清空工作树，也不得未经授权提交。
 2. 确认当前分支为 `main` 或专门创建的 `deps/xxx` 分支。
 3. 阅读目标依赖的 **Changelog / Release Notes**，标记所有 `Breaking Changes`。
 4. 对于 Tauri 生态依赖，查阅 [Tauri 官方迁移指南](https://tauri.app/start/migrate/)。
@@ -295,13 +295,15 @@ pnpm tauri android build --apk --target aarch64
 
 ## 4. 版本对齐矩阵
 
+2026-10-08 的 Tauri 2.12 升级范围、三方源码评估与实际验证见 [升级记录](../plan/tauri-2.12-upgrade/README.md)。该次保留原 AGP/Gradle/Kotlin/SDK/NDK，并撤销已被官方 tao 0.37.1 覆盖的本地补丁；iOS 功能开发与 G1 按用户要求暂停。
+
 ### 4.1 Tauri 核心跨层对齐
 
 | Rust Crate | 当前版本 | npm 包 | 当前版本 | 对齐规则 |
 |-----------|---------|--------|---------|---------|
-| `tauri` | `2.11.5` | `@tauri-apps/cli` | `2.11.4` | 主.次版本必须一致（`2.11.x`） |
-| `tauri` | `2.11.5` | `@tauri-apps/api` | `2.11.1` | 主.次版本必须一致（`2.11.x`） |
-| `tauri-build` | `2.6.3` | — | — | 独立版本，需与 `tauri` 兼容 |
+| `tauri` | `2.12.1` | `@tauri-apps/cli` | `2.12.1` | 主.次版本必须一致（`2.12.x`） |
+| `tauri` | `2.12.1` | `@tauri-apps/api` | `2.12.1` | 主.次版本必须一致（`2.12.x`） |
+| `tauri-build` | `2.7.1` | — | — | 独立版本，需与 `tauri` 兼容；本地插件 build helper 同为 2.7.1 |
 
 ### 4.2 Tauri 插件跨层对齐
 
@@ -315,8 +317,8 @@ pnpm tauri android build --apk --target aarch64
 | 项目 | 当前值 | 约束来源 |
 |------|--------|---------|
 | Rust Toolchain | `1.97.1` | CI、Release 与本地开发环境 |
-| Tauri MSRV | 见 `tauri` crate 文档 | `tauri` `Cargo.toml` 中 `rust-version` |
-| 当前依赖图最高 MSRV | `1.88` | `pdf_oxide 0.3.77` / `plist 1.10.0` |
+| Tauri MSRV | `1.90` | Tauri 2.12.1 的官方 `rust-version`；本地插件声明同步 |
+| 依赖图 MSRV | 逐次按实际锁文件检查 | 不把某两个依赖的下限当作全图最高值；本轮用锁定工具链 1.97.1 验证 |
 | Cargo Edition | `2021` | `src-tauri/Cargo.toml` |
 
 > **检查方法**：运行 `rustc --version`，确认不低于 Tauri 官方要求的 MSRV。若 Tauri 升级后提高 MSRV，必须同步更新 CI（`release.yml`、`ci.yml`）中的 Rust 安装步骤。
@@ -328,7 +330,7 @@ pnpm tauri android build --apk --target aarch64
 | `compileSdk` | `36` | `app/build.gradle.kts` |
 | `targetSdk` | `36` | `app/build.gradle.kts` |
 | `minSdk` | `26` | `app/build.gradle.kts` + `tauri.conf.json` |
-| `kotlinOptions.jvmTarget` | `1.8` | `app/build.gradle.kts` |
+| `compilerOptions.jvmTarget` | `JVM_1_8` | app 与本地插件 `build.gradle.kts` |
 
 **对齐规则**：`compileSdk == targetSdk`，且 `minSdk` 在 Gradle 与 `tauri.conf.json` 中双写一致。
 

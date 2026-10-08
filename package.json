@@ -34,7 +34,7 @@
     "perf:rust-bench": "node tests/perf/scripts/run_rust_bench.cjs"
   },
   "dependencies": {
-    "@tauri-apps/api": "2.11.1",
+    "@tauri-apps/api": "2.12.1",
     "@tauri-apps/plugin-opener": "2.5.4",
     "@vueuse/core": "^14.2.1",
     "@xterm/addon-fit": "0.10.0",
@@ -58,7 +58,7 @@
     "@iconify-json/heroicons": "^1.2.3",
     "@iconify-json/ph": "^1.2.2",
     "@pinia/testing": "^1.0.3",
-    "@tauri-apps/cli": "2.11.4",
+    "@tauri-apps/cli": "2.12.1",
     "@types/katex": "^0.16.8",
     "@types/sortablejs": "^1.15.9",
     "@typescript-eslint/eslint-plugin": "^8.66.0",

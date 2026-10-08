@@ -1,10 +1,13 @@
 use serde::Serialize;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
+#[cfg(not(target_os = "ios"))]
+use tokio::sync::Mutex;
+use tokio::sync::RwLock;
+#[cfg(not(target_os = "ios"))]
 use tokio_util::sync::CancellationToken;
 use tauri_plugin_vcp_mobile::events::LifecyclePhase;
-#[cfg(any(target_os = "android", test))]
+#[cfg(any(target_os = "android", target_os = "ios", test))]
 use tauri_plugin_vcp_mobile::events::NativeLifecycleEvent;
 
 use crate::vcp_modules::infra::local_server::ServerHandle;
@@ -36,7 +39,7 @@ pub struct LifecycleSnapshot {
 }
 
 impl LifecycleSnapshot {
-    #[cfg(any(target_os = "android", test))]
+    #[cfg(any(target_os = "android", target_os = "ios", test))]
     pub fn from_native(event: NativeLifecycleEvent, transition_epoch: u64) -> Self {
         Self {
             phase: event.phase,
@@ -53,12 +56,12 @@ impl LifecycleSnapshot {
 }
 
 #[derive(Default)]
-#[cfg(any(target_os = "android", test))]
+#[cfg(any(target_os = "android", target_os = "ios", test))]
 pub struct NativeLifecycleOrdering {
     last_sequence: Option<u64>,
 }
 
-#[cfg(any(target_os = "android", test))]
+#[cfg(any(target_os = "android", target_os = "ios", test))]
 impl NativeLifecycleOrdering {
     /// Accept the first snapshot even when the native source has not transitioned (0).
     pub fn accept(&mut self, sequence: u64) -> bool {
@@ -70,6 +73,7 @@ impl NativeLifecycleOrdering {
     }
 }
 
+#[cfg(not(target_os = "ios"))]
 pub struct LingerController {
     pub log_cancel: Mutex<Option<CancellationToken>>,
     pub dist_cancel: Mutex<Option<CancellationToken>>,
@@ -77,6 +81,7 @@ pub struct LingerController {
     pub is_dist_disconnected: AtomicBool,
 }
 
+#[cfg(not(target_os = "ios"))]
 impl LingerController {
     pub fn new() -> Self {
         Self {
@@ -103,9 +108,10 @@ pub struct LifecycleState {
     /// None until an actual native/host event has reached the authoritative owner.
     pub lifecycle_snapshot: RwLock<Option<LifecycleSnapshot>>,
     /// Native delivery ordering is checked before allocating a Rust transition epoch.
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     pub native_lifecycle_ordering: std::sync::Mutex<NativeLifecycleOrdering>,
     /// 统一后台 Linger 延时断连任务状态与控制器
+    #[cfg(not(target_os = "ios"))]
     pub linger: Arc<LingerController>,
 }
 
@@ -119,8 +125,9 @@ impl LifecycleState {
             local_server_handle: Arc::new(tokio::sync::Mutex::new(None)),
             is_foreground: Arc::new(AtomicBool::new(true)),
             lifecycle_snapshot: RwLock::new(None),
-            #[cfg(target_os = "android")]
+            #[cfg(any(target_os = "android", target_os = "ios"))]
             native_lifecycle_ordering: std::sync::Mutex::new(NativeLifecycleOrdering::default()),
+            #[cfg(not(target_os = "ios"))]
             linger: Arc::new(LingerController::new()),
         }
     }

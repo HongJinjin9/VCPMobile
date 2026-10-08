@@ -5,9 +5,13 @@ use tauri::{
 
 pub mod cli;
 pub mod events;
+pub mod ios;
 mod screen;
 pub mod stream;
 pub mod system;
+
+#[cfg(target_os = "ios")]
+tauri::ios_plugin_binding!(init_plugin_vcp_mobile);
 
 // iOS adapters are introduced phase by phase. A successful host fixture must
 // never be interpreted as a completed native operation on an iPhone or iPad.
@@ -23,16 +27,16 @@ fn ios_unsupported<T>(operation: &str) -> Result<T, String> {
 
 /// Plugin state shared across commands
 pub struct VcpMobileState<R: Runtime> {
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     plugin_handle: std::sync::Mutex<Option<tauri::plugin::PluginHandle<R>>>,
     #[cfg(target_os = "ios")]
-    _ios_adapter_pending: std::marker::PhantomData<fn() -> R>,
+    ios_calls: ios::NativeCalls,
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     _marker: std::marker::PhantomData<fn() -> R>,
 }
 
 impl<R: Runtime> VcpMobileState<R> {
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     pub fn mobile_plugin_handle(&self) -> Result<tauri::plugin::PluginHandle<R>, String> {
         self.plugin_handle
             .lock()
@@ -95,12 +99,14 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             #[cfg(target_os = "android")]
             let plugin_handle =
                 _api.register_android_plugin("com.vcp.mobile", "VcpMobilePlugin")?;
+            #[cfg(target_os = "ios")]
+            let plugin_handle = _api.register_ios_plugin(init_plugin_vcp_mobile)?;
 
             app.manage(VcpMobileState::<R> {
-                #[cfg(target_os = "android")]
+                #[cfg(any(target_os = "android", target_os = "ios"))]
                 plugin_handle: std::sync::Mutex::new(Some(plugin_handle)),
                 #[cfg(target_os = "ios")]
-                _ios_adapter_pending: std::marker::PhantomData,
+                ios_calls: ios::NativeCalls::default(),
                 #[cfg(not(any(target_os = "android", target_os = "ios")))]
                 _marker: std::marker::PhantomData,
             });

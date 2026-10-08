@@ -1,0 +1,47 @@
+name: iOS G1 plugin integration
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-g1-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  device-debug-archive:
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: Checkout selected revision
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.14.1
+      - name: Install locked frontend dependencies
+        run: |
+          npm install --global pnpm@12.6.0
+          pnpm install --frozen-lockfile
+      - name: Check maintained Apple inputs
+        run: python3 src-tauri/ios/scripts/g1.py check
+      - name: Build unsigned device debug archive and inspect bundle
+        run: python3 src-tauri/ios/scripts/g1.py build
+      - name: Preserve G1 diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ios-g1-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/vcp-ios-g1/*.json
+            ${{ runner.temp }}/vcp-ios-g1/*.log
+            ${{ runner.temp }}/vcp-ios-g1/*.txt
+            ${{ runner.temp }}/vcp-ios-g1/*.zip
+            ${{ runner.temp }}/vcp-ios-g1/SHA256SUMS
+            ${{ runner.temp }}/vcp-ios-g1/swiftpm/*.json
+          if-no-files-found: warn
+          retention-days: 14

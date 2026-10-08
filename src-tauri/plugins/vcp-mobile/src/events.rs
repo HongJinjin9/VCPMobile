@@ -33,12 +33,13 @@ pub struct NativeLifecycleEvent {
 }
 
 /// One native subscription per process. The Channel callback runs on the native
-/// calling thread: consumers must only enqueue work, never invoke Android here.
-#[cfg(target_os = "android")]
+/// calling thread: consumers must only enqueue work, never invoke native APIs here.
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub async fn subscribe<R: Runtime>(
     app: &AppHandle<R>,
     on_event: impl Fn(NativeEvent) + Send + Sync + 'static,
 ) -> Result<(), String> {
+    #[cfg(target_os = "android")]
     let handle = app
         .state::<crate::VcpMobileState<R>>()
         .mobile_plugin_handle()?;
@@ -51,6 +52,7 @@ pub async fn subscribe<R: Runtime>(
     });
     // Do not cancel this future on a timeout: the mobile bridge must receive the
     // eventual native response. Kotlin resolves after installing and replaying.
+    #[cfg(target_os = "android")]
     handle
         .run_mobile_plugin_async::<serde_json::Value>(
             "registerNativeEvents",
@@ -58,6 +60,8 @@ pub async fn subscribe<R: Runtime>(
         )
         .await
         .map_err(|error| error.to_string())?;
+    #[cfg(target_os = "ios")]
+    crate::ios::register_native_events(app, channel).await?;
     Ok(())
 }
 
