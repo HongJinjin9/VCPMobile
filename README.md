@@ -2,7 +2,7 @@
   <img src="./public/vcpmobile.svg" width="140" alt="VCP Mobile Logo">
   <h1>VCP Mobile</h1>
   <p><strong>Project Avatar</strong> · From Desktop Client to Cyber-Physical Avatar</p>
-  <p>基于 <b>Tauri v2 · Vue 3 · Rust</b> 的 Android 原生 AI Agent 终端<br/>
+  <p>基于 <b>Tauri v2 · Vue 3 · Rust</b> 的移动端原生 AI Agent 终端（Android 正式版 / iOS 适配中）<br/>
   <sub>VCPChat 的移动端进化形态 —— 对话、同步、渲染与设备能力，全部下沉至原生边界之内</sub></p>
 
   <p>
@@ -46,7 +46,7 @@
 - **零依赖增量同步** — WebSocket + HTTP 双通道直连桌面端，SHA-256 哈希差异比对，不经过任何第三方云
 - **Cyber-Physical 节点** — 14 项原生设备能力工具，让手机成为 AI 可直接调用的分布式计算节点
 
-> **支持范围**：生产运行、构建、发布与兼容性承诺仅覆盖 Android `arm64-v8a` 触控手机、平板，以及按当前窗口宽度响应的折叠屏（minSdk 26）。不支持桌面端、iOS、Android TV 或其他 ABI；桌面用户请使用 VCPChat。仓库中的 Vite 预览、host Rust 编译与非 Android fallback 仅用于开发和测试，详见 [`docs/ANDROID_UI_COMPATIBILITY.md`](docs/ANDROID_UI_COMPATIBILITY.md)。Web 构建目标显式冻结为 Chrome/WebView 87 时代语法（`chrome87`），防止工具链升级静默抬高语法门槛。
+> **支持范围**：当前生产平台为 Android `arm64-v8a` 触控手机、平板与按窗口宽度响应的折叠屏（minSdk 26）。iPhone/iPad 兼容已进入 [Phase 0–6 分期实施](plan/vcpmobile-ios-compatibility-research/08-分期实施路线图与验收门禁.md)，目标为复用 Vue/Rust 核心的实验性用户自签产物，尚未交付 iOS 构建。不支持桌面端、Android TV 或其他 Android ABI；桌面用户请使用 VCPChat。Vite 预览、host Rust 编译与现有非 Android fallback 不构成 iOS 实现或桌面产品入口。完整规范见 [`docs/MOBILE_UI_COMPATIBILITY.md`](docs/MOBILE_UI_COMPATIBILITY.md)。当前 Web 构建仍为 `chrome87`，WebKit 构建与交互适配按阶段推进。
 
 <div align="center">
   <img src=".github/assets/aurora-line.svg" width="100%" height="6" alt="" />
@@ -100,7 +100,7 @@ Aurora 之外，v1.1.6 的另一面是沉默的稳定性：同步协议归一化
 │  distributed/ —— 14 个设备能力工具                             │
 ├────────────────────────────────────────────────────────────────┤
 │  Native Layer —— Kotlin Plugin (tauri-plugin-vcp-mobile)       │
-│  44 条命令：前台保活 · 硬件状态 · 权限 · 文件 · 生命周期桥接    │
+│  42 条公开命令；内部原生入口另计，集合见 Phase 0 审计          │
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -136,7 +136,7 @@ sequenceDiagram
 | `invoke` → Rust → `PluginHandle` → Kotlin | 权限、硬件状态、文件选择、前台保活 |
 | Raw JNI | 屏幕常亮（零序列化开销） |
 | `evaluateJavascript` → `CustomEvent` | 键盘 Insets |
-| `plugin.trigger` → Rust → `app.emit` | 前后台生命周期（`vcp-lifecycle-changed`） |
+| native Channel → Rust → `app.emit` | 前后台生命周期（`vcp-lifecycle-changed`） |
 
 <div align="center">
   <img src=".github/assets/aurora-line.svg" width="100%" height="6" alt="" />
@@ -168,7 +168,7 @@ sequenceDiagram
 | Sync Protocol | [`docs/sync/`](docs/sync/00_总览与导航.md) | 17 | Delta Sync 全链路：协议、哈希体系、冲突仲裁、错误契约 |
 | Plugin Docs | [`docs/plugins/`](docs/plugins/00_总览与导航.md) | 13 | `tauri-plugin-vcp-mobile` 代码级说明 |
 
-顶层规范：[`UI_LAYER_ARCHITECTURE.md`](docs/UI_LAYER_ARCHITECTURE.md)（13 级语义化层级）· [`ANDROID_UI_COMPATIBILITY.md`](docs/ANDROID_UI_COMPATIBILITY.md)（平台边界与设备证据）· [`ANDROID_PLUGIN_MANAGEMENT.md`](docs/ANDROID_PLUGIN_MANAGEMENT.md)（权限与前台服务准则）· [`ANDROID_AGENT_DEBUGGING.md`](docs/ANDROID_AGENT_DEBUGGING.md)（Agent 安全调试契约）· [`Test_Architecture_Constraints.md`](docs/Test_Architecture_Constraints.md)（测试体系全局约束）。
+顶层规范：[`UI_LAYER_ARCHITECTURE.md`](docs/UI_LAYER_ARCHITECTURE.md)（13 级语义化层级）· [`MOBILE_UI_COMPATIBILITY.md`](docs/MOBILE_UI_COMPATIBILITY.md)（Android / iOS 平台边界与分平台验证）· [`ANDROID_PLUGIN_MANAGEMENT.md`](docs/ANDROID_PLUGIN_MANAGEMENT.md)（权限与前台服务准则）· [`ANDROID_AGENT_DEBUGGING.md`](docs/ANDROID_AGENT_DEBUGGING.md)（Agent 安全调试契约）· [`Test_Architecture_Constraints.md`](docs/Test_Architecture_Constraints.md)（测试体系全局约束）。
 
 <div align="center">
   <img src=".github/assets/aurora-line.svg" width="100%" height="6" alt="" />

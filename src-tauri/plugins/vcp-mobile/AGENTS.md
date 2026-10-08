@@ -1,12 +1,12 @@
-# AGENTS.md — VCP Mobile Android 原生插件
+# AGENTS.md — VCP Mobile 移动端原生插件
 
-> 本文件适用于 `src-tauri/plugins/vcp-mobile/**`。它继承仓库根规则，只补充 Android 原生能力边界内的代码结构、通信路径与修改闭环。
+> 本文件适用于 `src-tauri/plugins/vcp-mobile/**`。它继承仓库根规则，只补充移动端原生能力边界内的代码结构、通信路径与修改闭环；以下代码地图描述当前 Android 实现。
 
 ---
 
 ## 1. 子系统定位
 
-`tauri-plugin-vcp-mobile` 是 VCP Mobile 的 Android 原生能力层。它接收 Vue 或 Rust 核心发出的设备意图，经 Rust 插件边界进入 Kotlin、Service 或本地 CLI 宿主，再把调用结果或原生事件送回实际消费者。非 Android 实现只服务 host 开发与静态检查，不建立桌面产品能力。
+`tauri-plugin-vcp-mobile` 当前实现 VCP Mobile 的 Android 原生能力。它接收 Vue 或 Rust 核心发出的设备意图，经 Rust 插件边界进入 Kotlin、Service 或本地 CLI 宿主，再把调用结果或原生事件送回实际消费者。iOS Swift adapter 已纳入分期实施，需与 host 开发分支显式区分；当前非 Android fallback 不代表 iOS 可用，也不建立桌面产品能力。
 
 ### 1.1 正常调用链
 
@@ -60,5 +60,7 @@ Rust 核心可以直接调用 `screen`、`stream`、`system` 或 `cli` 暴露的
 跨层字段、方法名、返回值或事件必须沿生产调用链一次改完，并保留一个活动入口和一个实际所有者。长生命周期锁、Service、进程或 PTY 状态归当前持有它的原生组件管理，调用层只提交意图并消费结果，不复制第二套状态。
 
 Rust 边界变化在 `src-tauri/` 运行 `cargo check --locked -p tauri-plugin-vcp-mobile`；涉及前端类型或跨层调用时从仓库根运行 `pnpm check`。Kotlin、Manifest 或 Service 变化还需编译实际 Android 插件目标。测试只能作为额外执行结果，不能定义生产代码应有行为。
+
+Swift 接入时同步核对 `ios_path`、SwiftPM product、初始化 binding、selector、DTO、Channel 与资源归属；UI 操作显式在主队列执行，领域状态仍归 Rust。Apple 编译/链接按根规范集中在手动 Actions G1/G2，日常源码审计记录具体目标分支与待办。
 
 **完成**：实际消费者、Rust 边界、Kotlin 所有者、平台声明及返回通道保持一致，并分别说明已取得的 host、Android 构建或设备证据。

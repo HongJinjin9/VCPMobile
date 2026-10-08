@@ -64,6 +64,18 @@ src-tauri/gen/android/app/src/main/assets/
 src-tauri/plugins/**/android/build/
 src-tauri/plugins/**/android/.tauri/
 
+# iOS generated project and local SwiftPM state (recreated from maintained inputs)
+/src-tauri/gen/apple/
+/src-tauri/plugins/vcp-mobile/.tauri/
+/src-tauri/plugins/vcp-mobile/ios/.build/
+/src-tauri/plugins/vcp-mobile/ios/.swiftpm/
+
+# Apple signing material; plist, xcprivacy and Package manifests remain trackable
+*.p12
+*.p8
+*.mobileprovision
+*.provisionprofile
+
 # Device-local performance captures may contain serials, logcat, and system state.
 tests/perf/reports/*/
 

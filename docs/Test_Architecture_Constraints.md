@@ -2,7 +2,7 @@
 
 > 版本：v1.2（价值密度校准）
 > 状态：**正式约束文档** — 所有测试 Agent 必须遵循，冲突项需重新报批
-> 范围：Rust 后端 / Tauri 核心 / 自定义插件 / Vue 前端 / Android arm64 E2E / 手工性能诊断
+> 范围：Rust 后端 / Tauri 核心 / 自定义插件 / Vue 前端 / Android arm64 E2E / 手工性能诊断 / iOS 源码审计与阶段性 Actions 验收
 > 最近校准：2026-08-27
 > 当前实现：单一 `ci.yml` + Vitest/happy-dom + Rust tests + Android 插件 JVM tests + Android Debug Agent CLI
 
@@ -18,11 +18,12 @@
 
 | 项 | 决策 | 状态 |
 |----|------|------|
-| 产品目标 | 仅 Android `arm64-v8a` 触控手机/平板/按窗口宽度响应的折叠屏 | ✅ 生效 |
+| 产品目标 | Android `arm64-v8a` 正式链路；iPhone/iPad 实验性客户端按 Phase 0–6 实施 | ✅ 2026-10-08 启动 iOS 实施 |
 | 目录结构 | `src-tauri/tests/`、插件 `android/src/test/`、`src/tests/`、`tests/e2e-android/` | ✅ 已落地 |
 | 当前工具 | Vitest + happy-dom / cargo test + Criterion / JUnit + Robolectric + MockK / Node.js + adb | ✅ 已落地 |
 | 当前 CI | 单一 `.github/workflows/ci.yml` 执行前端、Rust、生成树、Android JVM 与审计门禁 | ✅ 已落地 |
 | 设备证据 | 具名 Android 设备截图、触控与 WebView 证据 | `DEVICE-EVIDENCE-PENDING` |
+| iOS 验收 | Windows 源码审计；Apple 构建仅在 G1/G2 手动 Actions 执行；现在及后续均不建设 iOS 实机测试体系 | D14/D16；不套用 Android 设备门禁 |
 
 ---
 
@@ -163,7 +164,7 @@ VCPMobile/
 | 软件测试基础设施 | ✅ 已落地 | 单一 CI、Vitest、Rust tests、Kotlin JVM tests |
 | 跨层与治理契约 | ✅ 已落地并持续维护 | 前端/Android/Release 文本和行为契约 |
 | Android Debug Agent | ✅ 已落地 | Debug-only USB Dev、有限诊断与单张截图；不冒充完整 UI runner |
-| 多设备样式验收 | `DEVICE-EVIDENCE-PENDING` | 按 `ANDROID_UI_COMPATIBILITY.md` 归档具名证据 |
+| Android 多设备样式验收 | `DEVICE-EVIDENCE-PENDING` | 按 `MOBILE_UI_COMPATIBILITY.md` Android 章节归档具名证据 |
 | 性能 Phase 1 | `ACTIVE / REPORT-ONLY` | D0 因果定位与 D1 packaged Debug A/B 已通过；R1、BootTrace 与固定 SLA 仍 pending |
 
 ---
@@ -197,4 +198,4 @@ VCPMobile/
 
 ---
 
-*最后更新：2026-08-13 | VCPMobile 测试体系 v1.1。平台与设备证据以 `ANDROID_UI_COMPATIBILITY.md` 为准。*
+*平台边界修订：2026-10-08。平台与验证边界以 `MOBILE_UI_COMPATIBILITY.md` 为准；既有 Android 测试分层保持原范围。*

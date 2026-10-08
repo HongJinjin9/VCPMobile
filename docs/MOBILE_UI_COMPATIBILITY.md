@@ -1,30 +1,34 @@
-# Android UI 兼容性规范
+# 移动端 UI 兼容性规范（Android / iOS）
 
 > 文档类型：产品支持与工程规范
-> 状态：`IMPLEMENTED / SOFTWARE-VERIFIED / DEVICE-EVIDENCE-PENDING`
-> 恢复基线：`cecdbe4`（包含最新 Diary 功能）；验证对象为当前未提交工作树
-> 生效日期：2026-08-13
+> Android 历史状态：`IMPLEMENTED / SOFTWARE-VERIFIED / DEVICE-EVIDENCE-PENDING`（原专项记录，不是本轮复验）
+> iOS 状态：`PHASE-0 / SOURCE-AUDIT`，尚无本项目 Apple 构建结果
+> Android 恢复基线：`cecdbe4`；iOS 启动基线：`4c6e25bb` 加任务开始时工作树，见 Phase 0 输入账本
+> 修订日期：2026-10-08；本文件接续原 Android UI 规范，保留 Android 契约并纳入 iOS 分期目标
 
 ## 1. 产品支持边界
 
-VCP Mobile 的生产运行、构建、发布与兼容性承诺仅覆盖以下目标：
+VCP Mobile 当前 Android 生产运行、构建与发布覆盖以下目标：
 
 - Android `arm64-v8a` 触控手机；
 - Android `arm64-v8a` 触控平板；
 - Android `arm64-v8a` 折叠屏，按**当前应用窗口的可用 CSS 宽度**响应，不按设备名称或物理形态分叉。
 
+iPhone/iPad 原生客户端已进入分期实施，目标为同一 Vue/Rust 核心加 Swift adapter、单 Scene、当前窗口宽度响应，以及供用户自行签名的实验性 device 产物。首版包括 Chat/Diary/Settings/SQLite/手动 Sync、原生 Files/PHPicker/staging/大图处理和 iOS 26+ 尽力后台；其他情况使用前台常亮。minimum 采用 iOS/iPadOS 15.0 工程基线，Phase 2 显式接入配置并在 G1 编译核验，新 API 按 availability 分层。
+
+相机、录音/语音、保存相册、incoming/outgoing share、系统通知/APNs、视频抽帧与完整设备工具沿用延期范围。产品决定见 [D1–D19](../plan/vcpmobile-ios-compatibility-research/09-Magi综合裁决与待决策清单.md)，实施与证据见 [Phase 0](../plan/vcpmobile-ios-compatibility-research/phase-0/README.md)。以上为目标契约，不表示当前已具备 iOS 平台实现。
+
 下列平台明确不受支持：
 
 - Windows、macOS、Linux 桌面端；桌面用户应使用 VCPChat；
-- iOS；
 - Android TV、遥控器/键盘为主要输入方式的 Android 设备；
 - 非 `arm64-v8a` Android ABI。
 
-仓库中的 Vite 浏览器预览、Rust host 编译、非 Android fallback 与 Tauri desktop scaffold 只用于开发、静态检查和测试。它们不是可分发产品入口，也不建立桌面端兼容义务。`pnpm tauri` 脚本必须保留，因为 Android 子命令也通过它调用；`tauri.conf.json` 的 desktop bundle schema 同样不代表桌面发布支持。
+仓库中的 Vite 浏览器预览、Rust host 编译与 Tauri desktop scaffold 只用于开发、静态检查和测试。现有非 Android fallback 不能作为 iOS 实现或证据。开发路径不建立桌面端兼容义务。`pnpm tauri` 脚本必须保留，因为移动端子命令通过它调用；`tauri.conf.json` 的 desktop bundle schema 同样不代表桌面发布支持。
 
 ## 2. 单一路径与窗口语义
 
-手机、平板与折叠屏必须共用同一份 Vue 组件树、Pinia 状态与 Rust/Tauri 业务契约。禁止按机型、品牌、UA 或“手机/平板”复制业务页面。
+Android 手机/平板/折叠屏与 iPhone/iPad 必须共用同一份 Vue 组件树、Pinia 状态与 Rust/Tauri 业务契约。禁止按机型、品牌、UA 或“手机/平板”复制业务页面。
 
 布局只由当前 WebView viewport 的可用宽度决定。旋转、分屏、自由窗与折叠/展开都必须重新计算；物理屏幕分辨率、Android 设备类别和方向只能作为诊断字段，不能直接决定布局模式。
 
@@ -40,9 +44,11 @@ VCP Mobile 的生产运行、构建、发布与兼容性承诺仅覆盖以下目
 
 所有横向 flex 子项必须明确 `min-width: 0`，纵向滚动链必须明确 `min-height: 0` 与唯一 overflow owner。长代码、表格、Mermaid、长中文名称和 UUID 不得撑破工作区。
 
-## 3. WebView 与 CSS 契约
+## 3. WebView / WKWebView 与 CSS 契约
 
 `minSdk` 只规定 Android API 安装下限，不代表 WebView 特性下限。`vite.config.ts` 显式冻结 `build.target = "chrome87"` 与 `cssTarget = "chrome87"`，用于防止依赖升级静默抬高生成 JS/CSS 语法门槛；它不是 Android/WebView 产品支持声明，也不能替代 fallback 和设备验收。设备证据必须记录 Android API、WebView provider/version、viewport、density 与字体缩放；不能通过系统版本或 UA 猜测 WebView 能力。
+
+iOS 使用 WKWebView；当前 `chrome87` 构建配置不构成 Safari 兼容结论。Phase 4 按 minimum 和实际 DOM/生成 CSS/JS 补齐 WebKit 构建目标与 fallback，保留以下三层 CSS 契约。iPhone/iPad 输入控件目标字号至少 16 CSS px，触控命中区至少 44×44 CSS px（可用 hit slop 保持视觉密度）；文本选择优先于祖先长按手势。
 
 CSS 按影响分为三层：
 
@@ -61,7 +67,9 @@ CSS 按影响分为三层：
 
 ## 4. 安全区与键盘 Insets
 
-原生层提供四边安全区和 IME 快照，单位为 Android 物理像素：
+### 4.1 Android 既有契约
+
+Android 原生层提供四边安全区和 IME 快照，单位为物理像素：
 
 ```ts
 interface NativeInsetsSnapshot {
@@ -85,6 +93,16 @@ interface NativeInsetsSnapshot {
 
 `env(safe-area-inset-*, fallback)` 的 fallback 只在语法/变量不可用时生效，返回 `0` 时不会自动提供最小间距；需要最小顶距时必须用明确的 `max()` 或归一化规则表达。
 
+### 4.2 iOS 目标契约（Phase 4 实施）
+
+- 安全区来自 WKWebView CSS 环境量或经坐标换算的原生快照，确定一个权威来源；不能同时叠加。
+- Swift 的 point、屏幕坐标、WebView 坐标与 CSS px 显式转换，不能套用 Android raw px 除 DPR 的公式。
+- 键盘避让扣除 `visualViewport` 已反映的缩小量；浮动/分离键盘按实际相交区域处理，硬件键盘不伪造底部高度。
+- 归一化后继续消费共享 `--vcp-safe-*` 与 `--vcp-ime-offset`，不在组件中新增第二套 Insets owner。
+- iPad picker/dialog/popover 的锚点、旋转与分屏更新需沿实际 presentation owner 处理；应用内返回复用 modal/page/session 顺序，根返回保持应用，不调用 Android 最小化语义。
+
+原生 DTO、快照重放、单位和去重字段以 Phase 1/2 的实际实现落实；本节不把尚未存在的 Swift API 描述为当前代码。
+
 ## 5. 强渲染不退化
 
 所有受支持窗口模式都必须保留同一消息能力：Markdown、代码高亮、KaTeX、Mermaid、SVG/MathML、受控 raw HTML、Tool、Thought、Diary/DailyNote、附件和流式 AST 收敛。
@@ -94,11 +112,13 @@ interface NativeInsetsSnapshot {
 - 对窄屏、旧 WebView 或平板隐藏复杂块、改成摘要或纯文本；
 - 破坏 Tool/Thought 展开、Diary 操作、代码复制、Mermaid 全屏、附件查看、文本选择、焦点或 scroll anchor；
 - 绕过富 HTML 过滤或扩大 active content；
-- 把异步资源移出 APK，导致离线首次使用失败。
+- 把异步资源移出平台应用包（Android APK / iOS app bundle），导致离线首次使用失败。
 
 完整不变量与 fixture 见计划目录中的 `04-消息强渲染能力保护契约.md`。
 
 ## 6. 可检测契约
+
+以下保留 Android UI 改动的验证要求。iOS 日常按源码入口、目标 cfg、字段、分支和资源释放逐条审计，必要时运行 host 辅助检查；Apple 构建只在 G1/G2 阶段通过 GitHub Actions 手动执行。项目现在及后续均不建设 iOS 实机测试体系，也不将下节 Android 设备矩阵扩展为 iOS 门禁。具体执行边界见 [07](../plan/vcpmobile-ios-compatibility-research/07-CI测试矩阵与无设备验证边界.md)。
 
 每个修改 Android shell、侧栏、Overlay、CSS fallback 或 Insets 的 PR，至少满足：
 
@@ -112,7 +132,7 @@ interface NativeInsetsSnapshot {
 
 Vitest + happy-dom 可以证明状态、DOM 契约和生成物静态约束，但不计算真实 CSS 几何。仓库当前没有 Playwright 桌面 E2E，也没有 Maestro flow；不得把二者写成现有门禁。Android 设备诊断采用仓库已有的 Debug-only Agent CLI，真机截图与触控可达性仍需具名设备证据，不能由 CLI 状态快照替代。
 
-## 7. 设备验收矩阵
+## 7. Android 设备验收矩阵
 
 每条设备记录必须绑定：commit、APK SHA-256、设备型号、Android API、ABI、WebView provider/version、CSS viewport、物理分辨率、density、字体缩放、方向/分屏状态、导航模式和验收人。
 
@@ -130,8 +150,10 @@ Vitest + happy-dom 可以证明状态、DOM 契约和生成物静态约束，但
 
 每个状态同时检查浅色/深色、字体 1.0×/1.5×、长内容、四边安全区、键盘开合与 Android 返回手势。模拟 viewport 只能作为前置筛查，不能替代目标 Android WebView 的截图与触控验证。
 
-当前专项状态为 `SOFTWARE-VERIFIED / DEVICE-EVIDENCE-PENDING`：当前工作树已通过 `pnpm check`、前端全量测试、生产构建、Android 插件 strict JVM 测试与 Android 生成树初始化；这仍不等于手机、平板、折叠屏和最低 WebView 已通过发布验收。具名设备报告归档前不得写成 `DEVICE-VERIFIED`。
+Android 原专项记录状态为 `SOFTWARE-VERIFIED / DEVICE-EVIDENCE-PENDING`：当时工作树已通过 `pnpm check`、前端全量测试、生产构建、Android 插件 strict JVM 测试与 Android 生成树初始化；这不是本轮工作树的复验结论，也不等于手机、平板、折叠屏和最低 WebView 已通过发布验收。具名设备报告归档前不得写成 `DEVICE-VERIFIED`。
 
 ## 8. 性能边界
 
 当前首屏体验不再作为本专项优化目标。仓库已有 `tests/perf/`、Criterion benchmark 与相关脚本继续保留，作为人工诊断和独立回归资产；本轮不删除、不扩建启动埋点、不冻结毫秒 SLA，也不以性能数字换取兼容性或强渲染能力。未来只有在可复现用户问题出现时，才以独立任务重新建立基线和验收标准。
+
+iOS 沿用 D16：以静态正确性与明确的像素、缓冲、副本、并发硬上限审计资源预算；设备性能专项为范围外。不得把静态预算描述成设备性能测量结果。

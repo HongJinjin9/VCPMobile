@@ -1,7 +1,7 @@
 # 02. WebView 兼容与 UI 响应式规范
 
 > 状态：`SUPERSEDED-BY-PROJECT-SPEC`
-> 本文保留专项设计推导。当前可执行规范已迁移到 [`docs/ANDROID_UI_COMPATIBILITY.md`](../../docs/ANDROID_UI_COMPATIBILITY.md)；其中平台范围、1024/1280 窗口模式、CSS fallback、四边 Insets 和证据等级优先于本文任何旧快照、数量或待实施措辞。
+> 本文保留专项设计推导。当前可执行规范已迁移到 [`docs/MOBILE_UI_COMPATIBILITY.md`](../../docs/MOBILE_UI_COMPATIBILITY.md)；其中平台范围、1024/1280 窗口模式、CSS fallback、四边 Insets 和分平台证据等级优先于本文任何旧快照、数量或待实施措辞。
 
 ## 当前冻结摘要
 

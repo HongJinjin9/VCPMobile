@@ -8,6 +8,8 @@
 
 `src-tauri/src/` 是 Project Avatar 的 Rust 应用核心。它在 Tauri 进程中建立长期状态与生命周期，把 Vue invoke 分发给对应业务领域，协调持久化、VCP 网络、同步、更新和分布式能力，并通过 Result、事件或 Channel 把结果送回调用方。
 
+iOS 分期适配复用这些领域 owner；Android、iOS adapter 与 host 开发分支需明确区分。Swift 持有 Apple 平台资源，Chat/Sync/SQLite/CAS 与业务终态继续由 Rust 拥有；是否已实现以当前目标 cfg 和实际调用链为准。
+
 ### 1.1 正常执行链
 
 ```text

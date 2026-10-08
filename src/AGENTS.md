@@ -6,7 +6,7 @@
 
 ## 1. 子系统定位
 
-`src/` 是 Project Avatar 的 Vue 渲染层。它把 Tauri 返回值、事件与流式消息归约为前端状态，按当前 Android 窗口宽度呈现同一套业务组件，并把触控、返回、表单和消息操作转换为现有 Store、Composable 或 IPC 调用。
+`src/` 是 Project Avatar 的 Vue 渲染层。它把 Tauri 返回值、事件与流式消息归约为前端状态，按当前移动端窗口宽度呈现同一套业务组件，并把触控、返回、表单和消息操作转换为现有 Store、Composable 或 IPC 调用。Android 为当前生产平台；iPhone/iPad 按根规范分期接入，平台原生差异在边界归一化，不能复制业务状态。
 
 ### 1.1 正常数据流
 
@@ -102,6 +102,6 @@ Vue 组件使用 `<script setup>`；状态 Store 延续 Composition API。样式
 
 实现需求时，从当前视图或事件入口追踪到 Store、Composable、IPC 与渲染消费者，复用现有 owner 完成最小闭环。跨 Rust/Tauri 边界时同时读取对应目录的 `AGENTS.md`，并以两端生产代码核对字段和生命周期。
 
-前端或跨层变化从仓库根运行 `pnpm check`。Android 窗口、Insets、返回、触控或性能结论分别以实际取得的构建与设备证据说明；测试只能作为额外执行结果，不能定义生产行为。
+前端或跨层变化从仓库根运行 `pnpm check`。Android 窗口、Insets、返回、触控或性能结论分别以实际取得的构建与设备证据说明；iOS 按根规范采用源码审计及 G1/G2 阶段性 Actions 验收，不建设实机测试体系。测试只能作为额外执行结果，不能定义生产行为。
 
 **完成**：目标行为由现有状态 owner 驱动，组件、覆盖层、IPC、渲染与清理路径保持一致，并明确说明已验证的生产代码路径、构建结果及尚未取得的设备证据。

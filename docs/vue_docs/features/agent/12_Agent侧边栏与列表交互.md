@@ -14,7 +14,7 @@ date: 2026-08-13
 
 `Agent侧边栏与列表交互`是 VCP Mobile 前端 **Agent 领域** 的入口级交互系统，负责智能体（Agent）与群组（Group）的列表展示、筛选、排序、快速操作，以及作为全局导航枢纽的侧边栏容器管理。它是用户与 AI 助手建立会话前的第一道交互界面，直接影响核心聊天功能的可达性。
 
-本模块只服务 Android `arm64-v8a` 触控手机、平板与按窗口宽度响应的折叠屏。文中的“大宽度常驻”不是桌面端适配；Windows/macOS/Linux 用户使用 VCPChat。权威平台与布局契约见 [`docs/ANDROID_UI_COMPATIBILITY.md`](../../../ANDROID_UI_COMPATIBILITY.md)。
+本模块的共享组件服务移动端窗口布局；Android `arm64-v8a` 为当前生产平台，iPhone/iPad 处于分期适配。文中的“大宽度常驻”不建立桌面端支持。权威平台与布局契约见 [移动端 UI 规范](../../../MOBILE_UI_COMPATIBILITY.md)。
 
 功能边界严格限定为：
 

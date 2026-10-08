@@ -19,9 +19,11 @@
 
 ## 1. 项目概览
 
-**VCP Mobile**（代号：Project Avatar）是 VCPChat 的移动端版本，基于 **Tauri v2 + Vue 3 + Rust**，生产目标仅为 Android `arm64-v8a`（`aarch64-linux-android`，minSdk 26）触控手机、平板与按当前窗口宽度响应的折叠屏。架构上为 Rust 核心层、Tauri IPC 层、Vue 3 渲染层三层隔离。
+**VCP Mobile**（代号：Project Avatar）是 VCPChat 的移动端版本，基于 **Tauri v2 + Vue 3 + Rust**。当前生产平台为 Android `arm64-v8a`（`aarch64-linux-android`，minSdk 26）触控手机、平板与按当前窗口宽度响应的折叠屏；iPhone/iPad 原生客户端已获授权按 Phase 0–6 实施，目标为复用 Vue/Rust 核心的实验性用户自签产物。架构上为 Rust 核心层、Tauri IPC 层、Vue 3 渲染层三层隔离。
 
-**平台边界（强约束）**：不支持 Windows/macOS/Linux 桌面端、iOS、Android TV 或其他 ABI；桌面用户使用 VCPChat。Vite 预览、host Rust 编译、非 Android fallback 和 Tauri desktop scaffold 仅用于开发/测试，不是产品入口。不得为“桌面兼容”增加业务分支，也不得删除 Android 子命令仍依赖的通用 `pnpm tauri` 脚本。完整 UI 契约见 `docs/ANDROID_UI_COMPATIBILITY.md`。
+**平台边界（强约束）**：不支持 Windows/macOS/Linux 桌面端、Android TV 或其他 Android ABI；桌面用户使用 VCPChat。Vite 预览、host Rust 编译与 Tauri desktop scaffold 仅用于开发/测试，不是产品入口；现有非 Android fallback 不代表 iOS 已实现。不得为“桌面兼容”增加业务分支，也不得删除移动端子命令仍依赖的通用 `pnpm tauri` 脚本。完整 UI 契约见 `docs/MOBILE_UI_COMPATIBILITY.md`。
+
+**iOS 实施边界**：沿用 `plan/vcpmobile-ios-compatibility-research/09-Magi综合裁决与待决策清单.md` 的 D1–D19；各阶段在对应 `phase-0/` 至 `phase-6/` 子目录维护子规划、审计与结果。Windows 日常源码审计，Apple 构建仅通过阶段性手动 GitHub Actions（G1 接入、G2 集成/打包）；现在及后续均不建设项目 iOS 实机测试体系，正式签名与付费 Team 不在范围内。Android 正式链路继续保留；源码审计、host 检查和 Apple 构建结果分别记录，不宣称互相替代。
 
 - 版本：`1.1.4`
 - 包名：`com.vcp.avatar`
@@ -87,7 +89,7 @@ VCPMobile/
 │   ├── sync/                   # 同步子系统文档
 │   ├── plugins/                # 插件文档
 │   ├── ANDROID_PLUGIN_MANAGEMENT.md
-│   ├── ANDROID_UI_COMPATIBILITY.md
+│   ├── MOBILE_UI_COMPATIBILITY.md
 │   ├── UI_LAYER_ARCHITECTURE.md
 │   ├── DEPENDENCY_MANAGEMENT.md
 │   └── SYNC_ARCHITECTURE.md
@@ -119,7 +121,7 @@ VCPMobile/
 - `ANDROID_PLUGIN_MANAGEMENT.md`：回答"**应该**怎么做"（开发规范、权限准则、选型指导）
 - `docs/plugins/`：回答"代码是**怎么**做的"（接口签名、数据流、实现细节）
 - `UI_LAYER_ARCHITECTURE.md`：全局 UI 层级规范，与 `src/core/constants/layers.ts` + `uno.config.ts` + `src/assets/themes.css` 三重机制对应
-- `ANDROID_UI_COMPATIBILITY.md`：Android arm64 产品边界、窗口宽度响应式、CSS/Insets 与设备证据的权威规范
+- `MOBILE_UI_COMPATIBILITY.md`：Android 生产边界与 iOS 实验目标、共享窗口布局、分平台 CSS/Insets 与验证边界的权威规范
 
 ### 2.2 Android 原生插件（`tauri-plugin-vcp-mobile`）
 
@@ -302,7 +304,7 @@ CI 与 Release 的当前行为由 `.github/workflows/ci.yml`、`.github/workflow
 | `docs/sync/`                                     | 同步子系统参考材料                                           |
 | `docs/plugins/`                                  | Android 原生插件参考材料                                     |
 | `docs/ANDROID_PLUGIN_MANAGEMENT.md`              | Android 插件管理规范：权限血训、前台服务、通知渠道           |
-| `docs/ANDROID_UI_COMPATIBILITY.md`               | Android arm64 支持范围、响应式布局、CSS/Insets 与设备证据规范 |
+| `docs/MOBILE_UI_COMPATIBILITY.md`                | Android / iOS 产品范围、共享布局、分平台 Insets 与验证规范 |
 | `docs/UI_LAYER_ARCHITECTURE.md`                  | UI 语义化层级参考材料                                       |
 | `src-tauri/plugins/vcp-mobile/Cargo.toml`        | 插件 Rust 依赖与构建元数据                                   |
 | `src-tauri/plugins/vcp-mobile/android/`          | Kotlin 源码与 AndroidManifest.xml                            |
