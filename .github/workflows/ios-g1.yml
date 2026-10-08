@@ -27,9 +27,7 @@ jobs:
         run: |
           npm install --global pnpm@12.6.0
           pnpm install --frozen-lockfile
-      - name: Check maintained Apple inputs
-        run: python3 src-tauri/ios/scripts/g1.py check
-      - name: Build unsigned device debug archive and inspect bundle
+      - name: Build unsigned device debug archive and collect diagnostics
         run: python3 src-tauri/ios/scripts/g1.py build
       - name: Preserve G1 diagnostics
         if: always()
@@ -41,7 +39,6 @@ jobs:
             ${{ runner.temp }}/vcp-ios-g1/*.log
             ${{ runner.temp }}/vcp-ios-g1/*.txt
             ${{ runner.temp }}/vcp-ios-g1/*.zip
-            ${{ runner.temp }}/vcp-ios-g1/SHA256SUMS
-            ${{ runner.temp }}/vcp-ios-g1/swiftpm/*.json
+            ${{ runner.temp }}/vcp-ios-g1/bundles/**
           if-no-files-found: warn
           retention-days: 14

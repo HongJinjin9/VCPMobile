@@ -1,5 +1,7 @@
 # Phase 2：Apple 工程与 G1 入口
 
+> 本文保留首次施工记录。下述 Swift shim、三 root 门禁和源码断言已按用户要求移除；当前 G1 直接执行工具链并收集原始诊断，见 [10-G1流程精简](./10-G1流程精简.md)。当前 CLI 为 2.12.1、官方 tao 为 0.37.1；旧门禁拒绝 log 的历史复现见 [08 的 R1](./08-代码复审与遗漏清单.md)。
+
 > 2026-10-08。已实现可重放工程输入和独立手动 workflow；本轮未推送、未触发 Actions、未执行 Apple 编译。Windows 检查结果与待执行 G1 分开记录。
 
 ## 1. Casper 裁决与边界
@@ -29,7 +31,7 @@ G1 只完成插件接入所需的 device debug archive、符号/资源/配置检
 
 `swift-rs@1.0.7/src-rs/build.rs::SwiftLinker::link` 为每个 package 独立执行 `swift build --build-path …`。三个实际 root 是 Tauri `mobile/ios-api`、opener `ios/`、VCP `ios/`；仅给 VCP manifest 加 `.exact("1.0.7")` 无法约束前两条图。
 
-[受控 Package.resolved](../../../src-tauri/ios/Package.resolved) 固定 SwiftRs `1.0.7`，revision `f64a4514de07f450ec5b6aa297624cd3479d9579`，已通过上游 tag 的只读 `git ls-remote` 核对。VCP manifest 同时 exact；G1 Swift shim 在三个 root 分别预置该 resolution，调用真实 Swift 并附加 `--force-resolved-versions`，成功后校验 lock 中所有 pins 与实际 `checkouts/swift-rs` 的 HEAD。未知 root 或调用形状变化都失败；不改依赖 manifest。Swift 官方将该参数定义为只采用 resolved 文件版本并拒绝过时解析。[SwiftPM 参数](https://github.com/swiftlang/swift-package-manager/blob/main/Sources/PackageManagerDocs/Documentation.docc/PackageRegistry/PackageRegistryPublish.md)。
+历史 `ios/Package.resolved`（现已移除）固定 SwiftRs `1.0.7`，revision `f64a4514de07f450ec5b6aa297624cd3479d9579`，已通过上游 tag 的只读 `git ls-remote` 核对。VCP manifest 同时 exact；当时 G1 Swift shim 在三个 root 分别预置该 resolution，调用真实 Swift 并附加 `--force-resolved-versions`，成功后校验 lock 中所有 pins 与实际 `checkouts/swift-rs` 的 HEAD。未知 root 或调用形状变化都失败；不改依赖 manifest。该套流程已按 10 撤下。
 
 opener 2.5.4 的 registry 包已自带 v1 `Package.resolved`，锁 SwiftRs 1.0.6（`b5ed223fcdab165bc21219c1925dc1e77e2bef5e`）。本阶段显式将这一已审计旧输入迁移至 1.0.7：要求 root 的父目录为 `tauri-plugin-opener-2.5.4` 且旧 lock SHA-256 为 `daf0cdf825417e400e2898d47c1de6912a112265f0fb14c056f46735e728b9c8`，并保存旧 lock/hash 到该 root 的 evidence。其他已有不匹配 lock 一律失败。Tauri/VCP root 当前不自带 lock。
 

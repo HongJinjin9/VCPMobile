@@ -1,17 +1,6 @@
 {
-  "gate": "G1",
-  "runner": "macos-15",
-  "runnerArchitecture": "arm64",
   "developerDir": "/Applications/Xcode_26.2.app/Contents/Developer",
-  "xcodeVersion": "26.2",
-  "xcodeBuild": "17C52",
-  "iphoneosSdk": "26.2",
-  "minimumOS": "15.0",
-  "tauriCli": "2.12.1",
-  "node": "24.14.1",
-  "pnpm": "12.6.0",
   "xcodegen": {
-    "version": "2.44.1",
     "url": "https://github.com/yonaskolb/XcodeGen/releases/download/2.44.1/xcodegen.zip",
     "sha256": "a2e905fb68446e9bb4008cdfe2e13e3f176d0cbcca828b71770f8e53fca91b73"
   }
