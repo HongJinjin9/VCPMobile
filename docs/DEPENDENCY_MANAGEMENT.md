@@ -295,8 +295,6 @@ pnpm tauri android build --apk --target aarch64
 
 ## 4. 版本对齐矩阵
 
-2026-10-08 的 Tauri 2.12 升级范围、三方源码评估与实际验证见 [升级记录](../plan/tauri-2.12-upgrade/README.md)。该次保留原 AGP/Gradle/Kotlin/SDK/NDK，并撤销已被官方 tao 0.37.1 覆盖的本地补丁；iOS 功能开发与 G1 按用户要求暂停。
-
 ### 4.1 Tauri 核心跨层对齐
 
 | Rust Crate | 当前版本 | npm 包 | 当前版本 | 对齐规则 |

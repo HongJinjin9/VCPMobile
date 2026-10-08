@@ -1,7 +1,5 @@
 # Phase 2：Apple 工程与 G1 入口
 
-> **后续状态：iOS 实施与 G1 已暂停。** 以下为阶段二原始工程与验证记录；升级后的 CLI 输入为 2.12.1，Rust swift-rs 为 1.0.8、SwiftPM 仍为 1.0.7，官方 tao 0.37.1 替代本地补丁。兼容性复核见 [升级审计](../../tauri-2.12-upgrade/03-iOS既有输入与补丁撤销.md)，未执行 Apple 构建。
-
 > 2026-10-08。已实现可重放工程输入和独立手动 workflow；本轮未推送、未触发 Actions、未执行 Apple 编译。Windows 检查结果与待执行 G1 分开记录。
 
 ## 1. Casper 裁决与边界

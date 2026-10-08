@@ -1,7 +1,5 @@
 # Phase 2：Swift 原生事件与资源
 
-> **后续状态：iOS 实施与 G1 已暂停。** Tauri 2.12 的相关 Swift API 与原基线一致，本文的插件行为保持；Rust/SwiftPM 独立版本与兼容审计见 [升级记录](../../tauri-2.12-upgrade/03-iOS既有输入与补丁撤销.md)，未追加 Apple 验证结论。
-
 > 2026-10-08。本文记录本阶段 Swift 源码及本地锁定 Tauri API 审计；Apple 编译、链接和实际运行尚待 G1，不以 Windows 检查代替。
 
 ## 1. 包与入口

@@ -1,6 +1,6 @@
 # Phase 2：单 Scene 与框架接入审计
 
-> **后续状态：iOS 实施与 G1 已暂停。** 以下保留 tao 0.35.3 的历史审计；Tauri 2.12.0 采用的官方 tao 0.37.1 已覆盖三处入口与返回值所有权，本地补丁由官方版本替代，见 [撤销依据](../../tauri-2.12-upgrade/03-iOS既有输入与补丁撤销.md)。这不代表取得 Apple 构建或设备证据。
+> 以下保留 tao 0.35.3 的历史审计；本地补丁已由官方 tao 0.37.1 替代。Apple 构建与 G1 尚未执行。
 
 > 2026-10-08。基线：Tauri 2.11.5、runtime-wry 2.11.4、tao 0.35.3、wry 0.55.1。本文记录源码与修改依据，不表示执行过 Apple 编译或设备启动。
 
@@ -52,7 +52,7 @@ UIApplicationSceneManifest
 
 ## 4. 修复交付方式与影响
 
-阶段二原实现曾在 `src-tauri/vendor/tao` 保存发布 crate 的源码，并通过应用 `[patch.crates-io]` 引用，同时从 workspace member 集合排除。升级撤销后的来源与替代记录见 [升级审计](../../tauri-2.12-upgrade/03-iOS既有输入与补丁撤销.md)。该历史补丁未引入另一套窗口状态或业务生命周期所有者。
+阶段二原实现曾在 `src-tauri/vendor/tao` 保存发布 crate 的源码，并通过应用 `[patch.crates-io]` 引用，同时从 workspace member 集合排除。该历史补丁未引入另一套窗口状态或业务生命周期所有者。
 
 取舍：
 

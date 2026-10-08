@@ -1,6 +1,6 @@
 # Apple 工程输入与 G1
 
-> 2026-10-08：按用户要求暂停 iOS 实施与 G1。Tauri 升级仅维护已有输入的兼容性；CLI 输入更新为 2.12.1，SwiftPM 继续固定真实发布的 1.0.7。依据见 [升级审计](../../plan/tauri-2.12-upgrade/03-iOS既有输入与补丁撤销.md)。
+> 2026-10-08：按用户要求暂停 iOS 实施与 G1。
 
 此目录保存生成树之外的可重放输入；`gen/apple/` 继续由锁定的 Tauri CLI 生成并忽略。G1 只由 [独立手动 workflow](../../.github/workflows/ios-g1.yml) 执行，生成 unsigned device debug archive。它不是发布或用户安装入口。
 
