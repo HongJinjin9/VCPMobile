@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useDataReload } from "../composables/useDataReload";
 import { useNotificationStore } from "./notification";
+import { usePlatformStore } from "./platform";
 import type { BatteryStatusDto } from "../types/native";
 
 type SyncStatus =
@@ -472,6 +473,8 @@ export const useSyncSessionStore = defineStore("syncSession", () => {
 
     // 原生设备电量与省电检测保障
     try {
+      // 未实现或未知时沿用真实读取失败的警告路径，不制造电量/省电成功值。
+      usePlatformStore().require('batteryStatus');
       const battery = await invoke<BatteryStatusDto>(
         "plugin:vcp-mobile|get_battery_status",
       );

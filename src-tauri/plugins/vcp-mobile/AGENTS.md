@@ -8,6 +8,8 @@
 
 `tauri-plugin-vcp-mobile` 当前实现 VCP Mobile 的 Android 原生能力。它接收 Vue 或 Rust 核心发出的设备意图，经 Rust 插件边界进入 Kotlin、Service 或本地 CLI 宿主，再把调用结果或原生事件送回实际消费者。iOS Swift adapter 已纳入分期实施，需与 host 开发分支显式区分；当前非 Android fallback 不代表 iOS 可用，也不建立桌面产品能力。
 
+Phase 1 将 Android、iOS、host 的插件分支显式隔离：iOS 尚未接通的首期能力返回 `not_implemented`，当前范围外能力返回 `unsupported`；固定状态与无副作用成功仅保留在排除 Android/iOS 的 host 开发 fixture 中。后续 adapter 只能替换对应 iOS 分支，不能借用 host 成功结果。
+
 ### 1.1 正常调用链
 
 ```text
@@ -44,6 +46,8 @@ Rust 核心内部调用 ─> Rust 公开入口 ─┼─> PluginHandle / JNI
 新增或删除前端 `plugin:vcp-mobile|...` 命令时，以 `src/lib.rs` 的实际注册入口为起点，同步 `build.rs`、相应 permission package 与所需 Kotlin 方法。`guest-js/index.ts` 只为确实使用包级 API 的调用方提供包装，不要求镜像全部注册命令。
 
 Kotlin 中存在 `@Command` 只表示它可被原生插件桥调用，不代表已经向 Vue 公开；不得据此扩张前端 API。
+
+应用授权另由 `src-tauri/capabilities/` 决定。`android-main.json` 逐项授予实际前端消费者需要的插件命令；`ios-main.json` 随已实现的 adapter 增补。`main` 以外当前没有生产窗口消费者，不授予遗留 `vcp-portal-*` 插件权限。Rust 内部调用不经过前端 ACL，仍必须保持自身的平台分支与资源所有者。
 
 ### 2.2 Rust 内部入口
 

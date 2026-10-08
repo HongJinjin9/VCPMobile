@@ -1,8 +1,11 @@
-use crate::vcp_modules::infra::lifecycle_state::LifecycleState;
+use crate::vcp_modules::infra::lifecycle_state::{LifecycleSnapshot, LifecycleState};
 use crate::vcp_modules::settings_manager::{read_settings, SettingsState};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_vcp_mobile::events::LifecyclePhase;
+#[cfg(target_os = "android")]
+use tauri_plugin_vcp_mobile::events::NativeLifecycleEvent;
 
 static LIFECYCLE_TRANSITION_EPOCH: AtomicU64 = AtomicU64::new(0);
 static LIFECYCLE_TRANSITION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -40,20 +43,53 @@ pub fn is_app_in_foreground<R: tauri::Runtime>(app: &AppHandle<R>) -> bool {
     }
 }
 
-#[tauri::command]
-pub async fn set_app_foreground_state(app: AppHandle, is_foreground: bool) {
-    set_app_foreground_state_internal(app, is_foreground).await;
+/// Native callbacks only enqueue work. Sequence rejection must precede epoch
+/// reservation, otherwise a late native event could invalidate newer work.
+#[cfg(target_os = "android")]
+pub fn enqueue_native_lifecycle_event(app: AppHandle, event: NativeLifecycleEvent) {
+    let epoch = {
+        let Some(state) = app.try_state::<LifecycleState>() else {
+            return;
+        };
+        let Ok(mut ordering) = state.native_lifecycle_ordering.lock() else {
+            log::error!("[Lifecycle] Native ordering lock poisoned; event rejected");
+            return;
+        };
+        if !ordering.accept(event.native_sequence) {
+            return;
+        }
+        reserve_lifecycle_transition()
+    };
+    tauri::async_runtime::spawn(async move {
+        apply_lifecycle_transition(app, LifecycleSnapshot::from_native(event, epoch)).await;
+    });
 }
 
-pub async fn set_app_foreground_state_internal(app: AppHandle, is_foreground: bool) {
-    let epoch = reserve_lifecycle_transition();
-    set_app_foreground_state_for_epoch(app, is_foreground, epoch).await;
-}
-
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub async fn set_app_foreground_state_for_epoch(app: AppHandle, is_foreground: bool, epoch: u64) {
+    apply_lifecycle_transition(
+        app,
+        LifecycleSnapshot {
+            phase: if is_foreground {
+                LifecyclePhase::Active
+            } else {
+                LifecyclePhase::Background
+            },
+            native_sequence: None,
+            snapshot: false,
+            transition_epoch: epoch,
+        },
+    )
+    .await;
+}
+
+async fn apply_lifecycle_transition(app: AppHandle, snapshot: LifecycleSnapshot) {
     let _transition_guard = LIFECYCLE_TRANSITION_LOCK.lock().await;
-    if !is_transition_epoch_current(epoch) {
-        log::debug!("[Lifecycle] Skipping stale transition epoch={}", epoch);
+    if !is_transition_epoch_current(snapshot.transition_epoch) {
+        log::debug!(
+            "[Lifecycle] Skipping stale transition epoch={}",
+            snapshot.transition_epoch
+        );
         return;
     }
     let state = match app.try_state::<LifecycleState>() {
@@ -62,6 +98,16 @@ pub async fn set_app_foreground_state_for_epoch(app: AppHandle, is_foreground: b
             log::warn!("[Lifecycle] LifecycleState not registered, skipping foreground transition");
             return;
         }
+    };
+
+    *state.lifecycle_snapshot.write().await = Some(snapshot);
+    // Emit even a same-phase first snapshot: Vue may have loaded after the transition.
+    let _ = app.emit("vcp-lifecycle-changed", snapshot);
+    let is_foreground = match snapshot.phase {
+        LifecyclePhase::Active => true,
+        LifecyclePhase::Background => false,
+        // Inactive is an interaction/rendering state, not a background lease request.
+        LifecyclePhase::Inactive => return,
     };
 
     // Epoch 只淘汰尚未执行的过期请求；已开始的 transition 在此锁内完整完成。
@@ -76,17 +122,20 @@ pub async fn set_app_foreground_state_for_epoch(app: AppHandle, is_foreground: b
         is_foreground
     );
 
-    // 1. 调整心跳频率
-    crate::vcp_modules::infra::vcp_log_service::handle_foreground_state_change(&app, is_foreground)
-        .await;
+    // iOS phase input is connected in Phase 2; its bounded domain policy is Phase 3.
+    // Android leases and linger timers must never run on the iOS branch.
+    #[cfg(not(target_os = "ios"))]
+    reconcile_foreground_services(&app, &state, is_foreground).await;
+}
 
-    // 向前端广播最新的前台状态（Tauri 官方单通道）
-    let _ = app.emit(
-        "vcp-lifecycle-changed",
-        serde_json::json!({
-            "state": if is_foreground { "resume" } else { "pause" }
-        }),
-    );
+#[cfg(not(target_os = "ios"))]
+async fn reconcile_foreground_services(
+    app: &AppHandle,
+    state: &LifecycleState,
+    is_foreground: bool,
+) {
+    crate::vcp_modules::infra::vcp_log_service::handle_foreground_state_change(app, is_foreground)
+        .await;
 
     if !is_foreground {
         // --- 进入后台 ---

@@ -12,6 +12,7 @@ import { computed, ref, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { useAppLifecycleStore } from '../../core/stores/appLifecycle';
 import { useNotificationStore } from '../../core/stores/notification';
+import { usePlatformStore } from '../../core/stores/platform';
 import { saveToDownloads } from '../../../src-tauri/plugins/vcp-mobile/guest-js';
 import {
   addressingOf,
@@ -452,6 +453,7 @@ export const useMailStore = defineStore('mail', () => {
     const box = selectedMailbox.value;
     if (!box) return;
     try {
+      usePlatformStore().require('fileExport');
       const payload = await invoke<Record<string, unknown>>('mail_attachment', {
         mailId,
         partId,

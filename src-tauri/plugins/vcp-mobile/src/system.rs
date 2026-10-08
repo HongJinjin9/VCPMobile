@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 use tauri::Manager;
 use tauri::{AppHandle, Runtime};
 
+// The explicit host branches below are development fixtures. iOS must use
+// its own adapter or return an unavailable error; it never consumes fixtures.
+
 #[cfg(target_os = "android")]
 const TEMP_FILE_MAX_BYTES: usize = 20 * 1024 * 1024;
 #[cfg(target_os = "android")]
@@ -61,7 +64,12 @@ pub fn check_all_permissions<R: Runtime>(app: AppHandle<R>) -> Result<Permission
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
         Ok(status)
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = app;
+        crate::ios_unsupported("check_all_permissions")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         Ok(PermissionStatus {
@@ -92,7 +100,12 @@ pub fn request_android_permission<R: Runtime>(
             )
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = (app, p_type);
+        crate::ios_unsupported::<()>("request_android_permission")?;
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         let _ = p_type;
@@ -111,7 +124,12 @@ pub fn move_task_to_back<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
             .run_mobile_plugin::<serde_json::Value>("moveTaskToBack", serde_json::json!({}))
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = app;
+        crate::ios_unsupported::<()>("move_task_to_back")?;
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
     }
@@ -140,7 +158,12 @@ pub fn check_notification_listener_permission<R: Runtime>(
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
         Ok(res)
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = app;
+        crate::ios_unsupported("check_notification_listener_permission")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         Ok(ListenerPermissionResponse { enabled: true })
@@ -163,7 +186,12 @@ pub fn request_notification_listener_permission<R: Runtime>(
             )
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = app;
+        crate::ios_unsupported::<()>("request_notification_listener_permission")?;
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
     }
@@ -190,7 +218,12 @@ pub fn request_auto_start_permission<R: Runtime>(app: AppHandle<R>) -> Result<bo
             .unwrap_or(false);
         Ok(success)
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = app;
+        crate::ios_unsupported("request_auto_start_permission")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         Ok(true)
@@ -217,7 +250,12 @@ pub fn request_power_management_permission<R: Runtime>(app: AppHandle<R>) -> Res
             .unwrap_or(false);
         Ok(success)
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = app;
+        crate::ios_unsupported("request_power_management_permission")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         Ok(true)
@@ -245,7 +283,12 @@ pub fn check_auto_start_permission<R: Runtime>(app: AppHandle<R>) -> Result<Stri
             .to_string();
         Ok(status)
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = app;
+        crate::ios_unsupported("check_auto_start_permission")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         Ok("unsupported".to_string())
@@ -273,7 +316,12 @@ pub fn get_free_disk_space<R: Runtime>(app: AppHandle<R>) -> Result<DiskSpaceInf
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
         Ok(info)
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = app;
+        crate::ios_not_implemented("get_free_disk_space")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         Ok(DiskSpaceInfo {
@@ -316,7 +364,12 @@ pub fn pick_file<R: Runtime>(
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
         Ok(file_info)
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = (app, mode);
+        crate::ios_not_implemented("pick_file")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         let _ = mode;
@@ -345,7 +398,12 @@ pub fn get_battery_status<R: Runtime>(app: AppHandle<R>) -> Result<BatteryStatus
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
         Ok(status)
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = app;
+        crate::ios_not_implemented("get_battery_status")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         Ok(BatteryStatus {
@@ -379,7 +437,12 @@ pub fn get_network_status<R: Runtime>(app: AppHandle<R>) -> Result<NetworkStatus
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
         Ok(status)
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = app;
+        crate::ios_unsupported("get_network_status")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         Ok(NetworkStatus {
@@ -415,7 +478,15 @@ pub fn open_file_native<R: Runtime>(
             )
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = (app, path);
+        if action == "share" {
+            return crate::ios_unsupported("open_file_native.share");
+        }
+        crate::ios_not_implemented::<()>("open_file_native")?;
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         let _ = path;
@@ -450,7 +521,12 @@ pub fn verify_apk_signature<R: Runtime>(
             )
             .map_err(|e| format!("run_mobile_plugin failed: {}", e));
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = (app, path);
+        crate::ios_unsupported("verify_apk_signature")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         let _ = path;
@@ -474,7 +550,12 @@ pub fn can_install_packages<R: Runtime>(app: AppHandle<R>) -> Result<bool, Strin
             .and_then(|v| v.as_bool())
             .unwrap_or(false));
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = app;
+        crate::ios_unsupported("can_install_packages")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         Ok(true)
@@ -496,7 +577,12 @@ pub fn open_unknown_sources_settings<R: Runtime>(app: AppHandle<R>) -> Result<()
             )
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = app;
+        crate::ios_unsupported::<()>("open_unknown_sources_settings")?;
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
     }
@@ -515,7 +601,12 @@ pub fn acquire_ota_keepalive<R: Runtime>(app: AppHandle<R>) -> Result<(), String
             .run_mobile_plugin::<serde_json::Value>("acquireOtaKeepalive", serde_json::json!({}))
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = app;
+        crate::ios_unsupported::<()>("acquire_ota_keepalive")?;
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
     }
@@ -533,7 +624,12 @@ pub fn release_ota_keepalive<R: Runtime>(app: AppHandle<R>) -> Result<(), String
             .run_mobile_plugin::<serde_json::Value>("releaseOtaKeepalive", serde_json::json!({}))
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = app;
+        crate::ios_unsupported::<()>("release_ota_keepalive")?;
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
     }
@@ -569,7 +665,12 @@ pub fn capture_window_snapshot<R: Runtime>(
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
         Ok(snapshot)
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = (app, max_width, quality);
+        crate::ios_unsupported("capture_window_snapshot")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         let _ = max_width;
@@ -606,7 +707,12 @@ pub fn save_image_to_gallery<R: Runtime>(
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
         Ok(result)
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = (app, source_url, file_name);
+        crate::ios_unsupported("save_image_to_gallery")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         let _ = source_url;
@@ -634,7 +740,12 @@ pub fn save_image_from_path<R: Runtime>(
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
         Ok(result)
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = (app, image_path, file_name);
+        crate::ios_unsupported("save_image_from_path")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         let _ = image_path;
@@ -676,7 +787,12 @@ pub fn save_to_downloads<R: Runtime>(
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
         Ok(result)
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = (app, file_name, content_base64, mime_type);
+        crate::ios_not_implemented("save_to_downloads.files_export")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         let _ = file_name;
@@ -714,7 +830,12 @@ pub fn write_temp_file<R: Runtime>(
         std::fs::write(&temp_path, bytes).map_err(|e| e.to_string())?;
         Ok(temp_path.to_string_lossy().to_string())
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = (app, bytes, file_name);
+        crate::ios_not_implemented("write_temp_file")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         let _ = bytes;
@@ -743,7 +864,12 @@ pub fn delete_temp_file<R: Runtime>(app: AppHandle<R>, file_path: String) -> Res
         std::fs::remove_file(path).map_err(|e| e.to_string())?;
         Ok(())
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = (app, file_path);
+        crate::ios_not_implemented("delete_temp_file")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         let _ = file_path;
@@ -765,7 +891,12 @@ pub fn start_download_notification<R: Runtime>(app: AppHandle<R>) -> Result<(), 
             )
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = app;
+        crate::ios_unsupported::<()>("start_download_notification")?;
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
     }
@@ -790,7 +921,12 @@ pub fn update_download_notification<R: Runtime>(
             )
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = (app, progress, text);
+        crate::ios_unsupported::<()>("update_download_notification")?;
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         let _ = progress;
@@ -813,7 +949,12 @@ pub fn cancel_download_notification<R: Runtime>(app: AppHandle<R>) -> Result<(),
             )
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = app;
+        crate::ios_unsupported::<()>("cancel_download_notification")?;
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
     }
@@ -834,7 +975,12 @@ pub fn request_overlay_permission<R: Runtime>(app: AppHandle<R>) -> Result<(), S
             )
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = app;
+        crate::ios_unsupported::<()>("request_overlay_permission")?;
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
     }
@@ -911,7 +1057,12 @@ pub fn register_shared_files<R: Runtime>(
         }
         Ok(results)
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = (app, owner_id, files);
+        crate::ios_unsupported("register_shared_files")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         let _ = owner_id;
@@ -979,7 +1130,12 @@ pub fn toggle_floating_ball<R: Runtime>(app: AppHandle<R>, show: bool) -> Result
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
         Ok(res.success)
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = (app, show);
+        crate::ios_unsupported("toggle_floating_ball")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         let _ = show;
@@ -1026,7 +1182,12 @@ pub async fn sample_sensor_data<R: Runtime>(
         .await
         .map_err(|error| format!("sensor sample worker failed: {error}"))?
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = (app, location, motion, ambient);
+        crate::ios_unsupported("sample_sensor_data")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         Ok(SensorSample {
@@ -1055,7 +1216,12 @@ pub fn get_cpu_thermal_status<R: Runtime>(app: AppHandle<R>) -> Result<String, S
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
         Ok(res.status)
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = app;
+        crate::ios_unsupported("get_cpu_thermal_status")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         Ok("正常".to_string())
@@ -1081,7 +1247,12 @@ pub fn get_gpu_status<R: Runtime>(app: AppHandle<R>) -> Result<GpuStatus, String
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
         Ok(status)
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = app;
+        crate::ios_unsupported("get_gpu_status")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         Ok(GpuStatus {
@@ -1109,7 +1280,12 @@ pub fn check_root_access<R: Runtime>(app: AppHandle<R>) -> Result<RootAccessStat
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
         Ok(status)
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = app;
+        crate::ios_unsupported("check_root_access")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         Ok(RootAccessStatus { is_root: false })
@@ -1141,7 +1317,12 @@ pub fn run_root_command<R: Runtime>(
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
         Ok(res)
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = (app, command);
+        crate::ios_unsupported("run_root_command")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         let _ = command;
@@ -1169,7 +1350,12 @@ pub fn write_clipboard_native<R: Runtime>(
             .run_mobile_plugin::<()>("writeClipboard", serde_json::json!({ "content": content }))
             .map_err(|e| format!("JNI writeClipboard failed: {}", e))?;
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = (app, content);
+        crate::ios_unsupported::<()>("write_clipboard_native")?;
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         let _ = content;
@@ -1187,7 +1373,12 @@ pub fn read_clipboard_native<R: Runtime>(app: AppHandle<R>) -> Result<String, St
             .map_err(|e| format!("JNI readClipboard failed: {}", e))?;
         Ok(res.content)
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = app;
+        crate::ios_unsupported("read_clipboard_native")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         Ok("Desktop Clipboard Placeholder".to_string())
@@ -1210,7 +1401,12 @@ pub fn send_notification_native<R: Runtime>(
             )
             .map_err(|e| format!("JNI sendLocalNotification failed: {}", e))?;
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = (app, title, body);
+        crate::ios_unsupported::<()>("send_notification_native")?;
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         let _ = title;
@@ -1244,7 +1440,12 @@ pub fn launch_root_manager<R: Runtime>(
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
         Ok(res)
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = app;
+        crate::ios_unsupported("launch_root_manager")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         Ok(LaunchRootManagerResult {
@@ -1266,7 +1467,12 @@ pub fn acquire_wake_lock<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
             .run_mobile_plugin::<serde_json::Value>("acquireWakeLock", serde_json::json!({}))
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = app;
+        crate::ios_unsupported::<()>("acquire_wake_lock")?;
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
     }
@@ -1284,7 +1490,12 @@ pub fn release_wake_lock<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
             .run_mobile_plugin::<serde_json::Value>("releaseWakeLock", serde_json::json!({}))
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = app;
+        crate::ios_unsupported::<()>("release_wake_lock")?;
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
     }
@@ -1302,7 +1513,12 @@ pub fn start_network_monitoring<R: Runtime>(app: AppHandle<R>) -> Result<(), Str
             .run_mobile_plugin::<serde_json::Value>("startNetworkMonitoring", serde_json::json!({}))
             .map_err(|e| format!("run_mobile_plugin failed: {}", e))?;
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = app;
+        crate::ios_unsupported::<()>("start_network_monitoring")?;
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
     }
@@ -1326,7 +1542,12 @@ pub fn get_pending_notification<R: Runtime>(
             .map_err(|e| format!("run_mobile_plugin getPendingNotification failed: {}", e))?;
         Ok(notification_data)
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = app;
+        crate::ios_unsupported("get_pending_notification")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         Ok(serde_json::json!({}))

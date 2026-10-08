@@ -1,17 +1,24 @@
 <script setup lang="ts">
 import { useAppLifecycleStore } from '../../core/stores/appLifecycle';
 import { invoke } from '@tauri-apps/api/core';
+import { usePlatformStore } from '../../core/stores/platform';
 
 const lifecycleStore = useAppLifecycleStore();
+const platformStore = usePlatformStore();
 
 let isRestarting = false;
 const restartApp = async () => {
   if (isRestarting) return;
   isRestarting = true;
   try {
-    await invoke('restart_or_exit_app');
+    if (platformStore.error || platformStore.platform !== 'android') {
+      await lifecycleStore.bootstrap(true);
+    } else {
+      await invoke('restart_or_exit_app');
+    }
   } catch (e) {
     console.error('Failed to restart app:', e);
+  } finally {
     isRestarting = false;
   }
 };

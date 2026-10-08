@@ -63,10 +63,8 @@ impl DbState {
 }
 
 pub async fn init_db(app_handle: &AppHandle) -> Result<(Pool<Sqlite>, std::path::PathBuf), String> {
-    // 获取应用配置目录 (Android 下通常为 /data/user/0/com.vcp.avatar/files)
-    let config_dir = app_handle
-        .path()
-        .app_config_dir()
+    // Android 保留 app_config_dir（activity.dataDir）；iOS 使用应用私有 Application Support。
+    let config_dir = crate::vcp_modules::file_manager::get_support_root_dir(app_handle)
         .map_err(|e| format!("Config dir failed: {}", e))?;
 
     // 确保父目录存在

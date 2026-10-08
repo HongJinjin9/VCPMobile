@@ -81,6 +81,9 @@ pub fn acquire_foreground_inner<R: Runtime>(
     label: &str,
     screen_keep_on: bool,
 ) -> Result<(), String> {
+    #[cfg(target_os = "ios")]
+    crate::ios_not_implemented::<()>("acquire_foreground")?;
+
     #[cfg(target_os = "android")]
     {
         let result = (|| {
@@ -114,6 +117,9 @@ pub fn acquire_foreground_inner<R: Runtime>(
 
 /// 释放进程级前台锁 (语义化接口)
 pub fn release_foreground_inner<R: Runtime>(_app: &AppHandle<R>, tag: &str) -> Result<(), String> {
+    #[cfg(target_os = "ios")]
+    crate::ios_not_implemented::<()>("release_foreground")?;
+
     #[cfg(target_os = "android")]
     {
         let result = (|| {
@@ -156,6 +162,9 @@ pub fn set_keepalive_mode_inner<R: Runtime>(
     app: &AppHandle<R>,
     is_keepalive: bool,
 ) -> Result<(), String> {
+    #[cfg(target_os = "ios")]
+    crate::ios_unsupported::<()>("set_keepalive_mode")?;
+
     if is_keepalive {
         acquire_foreground_inner(app, "distributed", 10, "distributed", false)
     } else {
@@ -187,6 +196,9 @@ pub fn set_keepalive_mode<R: Runtime>(app: AppHandle<R>, is_keepalive: bool) -> 
 #[tauri::command]
 #[allow(unused_variables)]
 pub fn start_helper_service<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    #[cfg(target_os = "ios")]
+    crate::ios_unsupported::<()>("start_helper_service")?;
+
     #[cfg(target_os = "android")]
     {
         let result = (|| {

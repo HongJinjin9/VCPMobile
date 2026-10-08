@@ -3,15 +3,18 @@ import { ref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import SettingsActionWithStatus from '../../../components/settings/SettingsActionWithStatus.vue';
 import { useOverlayStore } from '../../../core/stores/overlay';
+import { usePlatformStore } from '../../../core/stores/platform';
 
 
 const overlayStore = useOverlayStore();
+const platformStore = usePlatformStore();
 
 const cacheStatus = ref<{ type: 'success' | 'error' | 'loading' | null; message: string }>({ type: null, message: '' });
 
 const clearSystemCache = async () => {
   cacheStatus.value = { type: 'loading', message: '正在清理 WebView HTTP 缓存...' };
   try {
+    platformStore.require('webviewCache');
     const result = await invoke<string>('clear_webview_cache');
     cacheStatus.value = { type: 'success', message: result };
     setTimeout(() => { cacheStatus.value = { type: null, message: '' }; }, 5000);
@@ -29,7 +32,7 @@ const openRebuildSession = () => {
 
 <template>
   <div class="space-y-6">
-    <div>
+    <div v-if="platformStore.isImplemented('webviewCache')">
       <SettingsActionWithStatus
         title="清理 WebView 缓存"
         description="清除 WebView HTTP 缓存（解决磁盘空间异常占用）"

@@ -4,6 +4,7 @@ import DistributedView from "@/features/distributed/DistributedView.vue";
 import { useNotificationStore } from "@/core/stores/notification";
 import { invokeMock, mockInvoke } from "@/tests/mocks/tauri";
 import { mountWithPinia } from "@/tests/utils/mount";
+import { configureAndroidPlatform } from "@/tests/fixtures/platform";
 
 interface ToolFixture {
   name: string;
@@ -66,7 +67,7 @@ function installBaseMocks(tools: ToolFixture[]) {
 async function mountOpenView() {
   const wrapper = mountWithPinia(DistributedView, {
     props: { isOpen: true },
-  });
+  }, configureAndroidPlatform);
   await wrapper.get('[data-distributed-tab="plugins"]').trigger("click");
   return wrapper;
 }
@@ -157,7 +158,7 @@ describe("DistributedView explicit tool authorization", () => {
 
     const wrapper = mountWithPinia(DistributedView, {
       props: { isOpen: true },
-    });
+    }, configureAndroidPlatform);
     await vi.waitFor(() => {
       expect(
         wrapper

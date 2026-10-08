@@ -13,6 +13,7 @@ pub mod types;
 use std::sync::Arc;
 
 use client::DistributedClient;
+use crate::vcp_modules::infra::platform::{require_capability, CapabilityName};
 use tauri::State;
 use tokio::sync::RwLock;
 
@@ -43,6 +44,7 @@ impl DistributedState {
 pub async fn get_distributed_status(
     state: State<'_, DistributedState>,
 ) -> Result<types::DistributedStatus, String> {
+    require_capability(CapabilityName::Distributed)?;
     let client = state.client.read().await;
     Ok(client.get_status().await)
 }
@@ -53,6 +55,7 @@ pub async fn get_registered_tools_metadata(
     app: tauri::AppHandle,
     state: State<'_, DistributedState>,
 ) -> Result<Vec<serde_json::Value>, String> {
+    require_capability(CapabilityName::Distributed)?;
     state.registry.ensure_enabled_config_loaded(&app).await;
     Ok(state.registry.get_tools_metadata())
 }
@@ -63,6 +66,7 @@ pub async fn get_distributed_tool_config_status(
     app: tauri::AppHandle,
     state: State<'_, DistributedState>,
 ) -> Result<tool_registry::ToolConfigStatus, String> {
+    require_capability(CapabilityName::Distributed)?;
     Ok(state.registry.ensure_enabled_config_loaded(&app).await)
 }
 
@@ -73,6 +77,7 @@ pub async fn update_enabled_tools(
     state: State<'_, DistributedState>,
     enabled_names: Vec<String>,
 ) -> Result<(), String> {
+    require_capability(CapabilityName::Distributed)?;
     state.registry.ensure_enabled_config_loaded(&app).await;
     let changed = state
         .registry
@@ -94,6 +99,7 @@ pub async fn reset_distributed_tools_disabled(
     app: tauri::AppHandle,
     state: State<'_, DistributedState>,
 ) -> Result<(), String> {
+    require_capability(CapabilityName::Distributed)?;
     state.registry.reset_all_disabled(&app).await?;
     let client = state.client.read().await;
     if client.is_running().await {
@@ -109,6 +115,7 @@ pub async fn execute_distributed_tool(
     state: State<'_, DistributedState>,
     name: String,
 ) -> Result<String, String> {
+    require_capability(CapabilityName::Distributed)?;
     let res = state
         .registry
         .execute(&name, serde_json::Value::Null, &app)
@@ -124,6 +131,7 @@ pub async fn execute_distributed_tool(
 pub async fn reconnect_distributed_client(
     state: State<'_, DistributedState>,
 ) -> Result<(), String> {
+    require_capability(CapabilityName::Distributed)?;
     let client = state.client.read().await;
     client.trigger_reconnect().await;
     Ok(())

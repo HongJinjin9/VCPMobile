@@ -3486,6 +3486,9 @@ pub async fn prepare_sync_log_share_file(
     app: AppHandle,
     filename: String,
 ) -> Result<String, String> {
+    crate::vcp_modules::infra::platform::require_capability(
+        crate::vcp_modules::infra::platform::CapabilityName::OutgoingShare,
+    )?;
     let source = resolve_sync_log_file(&app, &filename, "SYNC_LOG_SHARE_FAILED").await?;
     let cache_root = app
         .path()

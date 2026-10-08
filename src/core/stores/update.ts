@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
+import { computed, onScopeDispose, ref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { usePlatformStore } from './platform';
 import {
   UPDATE_STATUS_EVENT,
   type UpdateState,
@@ -26,7 +27,22 @@ const IDLE_STATUS: UpdateStatus = {
 export const useUpdateStore = defineStore('update', () => {
   const status = ref<UpdateStatus>({ ...IDLE_STATUS });
   const isPromptOpen = ref(false);
+  const platformStore = usePlatformStore();
   let initialized = false;
+  let initPromise: Promise<void> | null = null;
+  let unlistenStatus: (() => void) | null = null;
+  let disposed = false;
+
+  const requireUpdater = () => {
+    platformStore.require('apkUpdate');
+    if (disposed) throw new Error('更新状态已释放');
+  };
+
+  onScopeDispose(() => {
+    disposed = true;
+    unlistenStatus?.();
+    unlistenStatus = null;
+  });
 
   const state = computed<UpdateState>(() => status.value.state);
   const info = computed(() => status.value.info);
@@ -46,43 +62,68 @@ export const useUpdateStore = defineStore('update', () => {
 
   /** 幂等初始化：订阅 Rust 状态广播并补拉当前快照。 */
   const init = async () => {
+    requireUpdater();
     if (initialized) return;
-    initialized = true;
-    await listen<UpdateStatus>(UPDATE_STATUS_EVENT, (event) => {
-      applyStatus(event.payload);
-    });
+    if (initPromise) return initPromise;
+    initPromise = (async () => {
+      const release = await listen<UpdateStatus>(UPDATE_STATUS_EVENT, (event) => {
+        if (!disposed) applyStatus(event.payload);
+      });
+      if (disposed) {
+        release();
+        throw new Error('更新状态已释放');
+      }
+      unlistenStatus = release;
+      try {
+        const snapshot = await invoke<UpdateStatus>('get_update_status');
+        requireUpdater();
+        applyStatus(snapshot);
+        initialized = true;
+      } catch (error) {
+        unlistenStatus?.();
+        unlistenStatus = null;
+        throw error;
+      }
+    })();
     try {
-      applyStatus(await invoke<UpdateStatus>('get_update_status'));
-    } catch (e) {
-      console.warn('[UpdateStore] get_update_status failed:', e);
+      await initPromise;
+    } finally {
+      initPromise = null;
     }
   };
 
   const check = async (): Promise<UpdateStatus> => {
+    requireUpdater();
+    await init();
     const next = await invoke<UpdateStatus>('check_for_update');
     applyStatus(next);
     return next;
   };
 
   const startDownload = async (): Promise<UpdateStatus> => {
+    requireUpdater();
+    await init();
     const next = await invoke<UpdateStatus>('start_update_download');
     applyStatus(next);
     return next;
   };
 
   const cancelDownload = async (): Promise<UpdateStatus> => {
+    requireUpdater();
     const next = await invoke<UpdateStatus>('cancel_update_download');
     applyStatus(next);
     return next;
   };
 
   const install = async (): Promise<UpdateStatus> => {
+    requireUpdater();
     const next = await invoke<UpdateStatus>('install_update');
     applyStatus(next);
     return next;
   };
 
   const openPrompt = () => {
+    requireUpdater();
     isPromptOpen.value = true;
   };
 

@@ -17,11 +17,25 @@ import org.robolectric.annotation.Config
 @Config(sdk = [28])
 class LifecycleBridgeTest {
     @Test
+    fun sequenceContinuesWhenNativeBridgeIsRecreated() {
+        val owner = mockk<LifecycleOwner>()
+        val original = LifecycleBridge()
+        original.onResume(owner)
+        val oldSequence = original.snapshot().getLong("nativeSequence")
+        original.detach()
+
+        val replacement = LifecycleBridge()
+        replacement.onResume(owner)
+        assertEquals(oldSequence + 1L, replacement.snapshot().getLong("nativeSequence"))
+    }
+
+    @Test
     fun snapshotRetainsLatestTransitionBeforeNativeSubscription() {
         val bridge = LifecycleBridge()
         val owner = mockk<LifecycleOwner>()
 
         bridge.onResume(owner)
+        val resumeSequence = bridge.snapshot().getLong("nativeSequence")
         bridge.onPause(owner)
         bridge.onStop(owner)
         bridge.onLowMemory()
@@ -30,12 +44,13 @@ class LifecycleBridgeTest {
         })
 
         val background = bridge.snapshot()
-        assertEquals("pause", background.getString("state"))
-        assertEquals(2L, background.getLong("epoch"))
+        assertEquals("background", background.getString("phase"))
+        assertEquals(resumeSequence + 1L, background.getLong("nativeSequence"))
+        assertEquals(true, background.getBoolean("snapshot"))
 
         bridge.onResume(owner)
-        assertEquals("resume", bridge.snapshot().getString("state"))
-        assertEquals(3L, bridge.snapshot().getLong("epoch"))
+        assertEquals("active", bridge.snapshot().getString("phase"))
+        assertEquals(resumeSequence + 2L, bridge.snapshot().getLong("nativeSequence"))
     }
 
     @Test
@@ -57,7 +72,9 @@ class LifecycleBridgeTest {
             bridge.onStop(owner)
             assertEquals(1, events.size)
             assertEquals("lifecycle", events.single().first)
-            assertEquals("pause", events.single().second.getString("state"))
+            assertEquals("background", events.single().second.getString("phase"))
+            assertEquals(false, events.single().second.getBoolean("snapshot"))
+            assertEquals(bridge.snapshot().getLong("nativeSequence"), events.single().second.getLong("nativeSequence"))
 
             bridge.detach()
             bridge.onResume(owner)

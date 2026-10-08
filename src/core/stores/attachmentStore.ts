@@ -3,6 +3,7 @@ import { ref, nextTick } from "vue";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useNotificationStore } from "./notification";
+import { usePlatformStore } from "./platform";
 import type { PickedFile } from "tauri-plugin-vcp-mobile";
 import type {
   NativeFileProgressDetail,
@@ -91,10 +92,14 @@ export const useAttachmentStore = defineStore("attachment", () => {
   };
 
   /**
-   * 触发文件选择器并暂存附件 (Android 物理端使用原生选择拦截直传，其他端使用标准 HTML Input 完美支持)
+   * 触发文件选择器并暂存附件；原生实现由 capability 选择，HTML 是独立导入子路径。
    */
   const handleAttachment = async (mode: 'camera' | 'gallery' | 'file' = 'file') => {
-    const isAndroid = navigator.userAgent.toLowerCase().includes("android");
+    const platformStore = usePlatformStore();
+    if (mode === 'camera') platformStore.require('camera');
+    const nativePicker = platformStore.isImplemented(
+      mode === 'camera' ? 'camera' : mode === 'file' ? 'filePicker' : 'photoPicker',
+    );
     
     // ==================================================================
     // Android 端主链路：原生插件拦截直传
@@ -103,8 +108,8 @@ export const useAttachmentStore = defineStore("attachment", () => {
     //   - Native 层流式拷贝到 cacheDir 并计算 SHA-256，最后通过
     //     register_local_file 零拷贝注册到附件目录
     // ==================================================================
-    if (isAndroid) {
-      console.log(`[AttachmentStore] Android environment detected. Intercepting via native picker. Mode: ${mode}`);
+    if (nativePicker) {
+      console.log(`[AttachmentStore] Using native picker. Mode: ${mode}`);
       const notificationStore = useNotificationStore();
       
       const stableId = `att_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -306,7 +311,7 @@ export const useAttachmentStore = defineStore("attachment", () => {
     }
 
     // ==================================================================
-    // 非 Android 端的标准 HTML `<input>` 流程
+    // 尚无原生 adapter 时的独立 HTML `<input>` 子路径；不代表 native picker 已实现
     //   - 含旧版分流逻辑：小文件 (<2MB) 走 store_file IPC；大文件走
     //     prepare_vcp_upload 高速 TCP 链路
     //   - Android 端已在上方通过原生插件处理，不会执行到此处

@@ -3,6 +3,7 @@ import { ref, watch, onUnmounted } from 'vue';
 import { useModalHistory } from '../../../core/composables/useModalHistory';
 import { useNotificationStore } from '../../../core/stores/notification';
 import { useThemeStore } from '../../../core/stores/theme';
+import { usePlatformStore } from '../../../core/stores/platform';
 import { saveImageToGallery } from 'tauri-plugin-vcp-mobile';
 
 const props = defineProps<{
@@ -17,6 +18,7 @@ const emit = defineEmits<{
 
 const themeStore = useThemeStore();
 const notificationStore = useNotificationStore();
+const platformStore = usePlatformStore();
 
 const modalId = `MermaidFullScreen_${Math.random().toString(36).substring(2, 9)}`;
 const { registerModal, unregisterModal } = useModalHistory();
@@ -209,6 +211,7 @@ const copySvg = async () => {
 
 
 const exportToGallery = () => {
+  if (!platformStore.isImplemented('gallerySave')) return;
   if (!fullscreenCanvasRef.value) return;
   const svg = fullscreenCanvasRef.value.querySelector('svg');
   if (!svg) return;
@@ -338,7 +341,7 @@ const exportToGallery = () => {
             </div>
 
             <!-- 保存到相册按钮（改用下载图标，文字按钮样式） -->
-            <button @click="exportToGallery" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs active:scale-95 transition-all"
+            <button v-if="platformStore.isImplemented('gallerySave')" @click="exportToGallery" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs active:scale-95 transition-all"
               :class="themeStore.isDarkResolved ? 'border-white/10 bg-white/5 text-gray-400' : 'border-black/10 bg-black/5 text-gray-600'">
               <div class="i-ph:download-simple-bold w-3.5 h-3.5"></div>
               <span>保存到相册</span>

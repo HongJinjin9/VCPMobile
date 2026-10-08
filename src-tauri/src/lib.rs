@@ -49,11 +49,14 @@ pub fn run() {
 
             let handle = app.handle().clone();
 
-            // 前端始终使用 APK 内嵌资源；旧 OTA 目录的 best-effort 清理不阻塞冷启动。
-            let legacy_cleanup_handle = handle.clone();
-            tauri::async_runtime::spawn_blocking(move || {
-                vcp_modules::update_manager::cleanup_legacy_frontend_ota(&legacy_cleanup_handle);
-            });
+            // Android 前端使用 APK 内嵌资源；旧 OTA 清理仅属于 Android 更新链。
+            #[cfg(target_os = "android")]
+            {
+                let legacy_cleanup_handle = handle.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    vcp_modules::update_manager::cleanup_legacy_frontend_ota(&legacy_cleanup_handle);
+                });
+            }
 
             // 1. 清理上传缓存
             vcp_modules::file_manager::clear_upload_cache(&handle);

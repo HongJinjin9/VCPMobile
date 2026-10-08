@@ -9,11 +9,25 @@ mod screen;
 pub mod stream;
 pub mod system;
 
+// iOS adapters are introduced phase by phase. A successful host fixture must
+// never be interpreted as a completed native operation on an iPhone or iPad.
+#[cfg(target_os = "ios")]
+fn ios_not_implemented<T>(operation: &str) -> Result<T, String> {
+    Err(format!("not_implemented: {operation} has no iOS adapter yet"))
+}
+
+#[cfg(target_os = "ios")]
+fn ios_unsupported<T>(operation: &str) -> Result<T, String> {
+    Err(format!("unsupported: {operation} is outside the current iOS capability set"))
+}
+
 /// Plugin state shared across commands
 pub struct VcpMobileState<R: Runtime> {
     #[cfg(target_os = "android")]
     plugin_handle: std::sync::Mutex<Option<tauri::plugin::PluginHandle<R>>>,
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    _ios_adapter_pending: std::marker::PhantomData<fn() -> R>,
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     _marker: std::marker::PhantomData<fn() -> R>,
 }
 
@@ -85,7 +99,9 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             app.manage(VcpMobileState::<R> {
                 #[cfg(target_os = "android")]
                 plugin_handle: std::sync::Mutex::new(Some(plugin_handle)),
-                #[cfg(not(target_os = "android"))]
+                #[cfg(target_os = "ios")]
+                _ios_adapter_pending: std::marker::PhantomData,
+                #[cfg(not(any(target_os = "android", target_os = "ios")))]
                 _marker: std::marker::PhantomData,
             });
 

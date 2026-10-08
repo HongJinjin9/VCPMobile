@@ -4,6 +4,7 @@ import { useModalHistory } from '../composables/useModalHistory';
 import { LAYER_PAGE_BASE, LAYER_PAGE_MAX_OFFSET } from '../constants/layers';
 import { useSyncSessionStore } from './syncSession';
 import { useRebuildSessionStore } from './rebuildSession';
+import { usePlatformStore } from './platform';
 import type { OverlayActionItem, ContextMenuConfig, PromptConfig, EditorConfig, ConfirmConfig } from '../types/overlay';
 
 export type OverlayPageType =
@@ -84,6 +85,8 @@ export const useOverlayStore = defineStore('overlay', () => {
   };
 
   const pushPage = (type: OverlayPageType, id?: string) => {
+    if (type === 'distributed' && !usePlatformStore().isImplemented('distributed')) return;
+    if (type === 'cliManifest' && !usePlatformStore().isImplemented('cli')) return;
     const modalId = `Page:${type}:${id || ''}`;
     const top = pageStack.value[pageStack.value.length - 1];
     if (top && top.type === type && top.id === id) return;

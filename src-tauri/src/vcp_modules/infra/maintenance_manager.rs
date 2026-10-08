@@ -3,8 +3,8 @@
 
 use crate::vcp_modules::db_manager::DbState;
 use crate::vcp_modules::file_manager::{
-    delete_attachment_physical, get_attachments_root_dir, get_multimodal_cache_dir,
-    get_thumbnails_root_dir,
+    delete_attachment_physical, get_attachments_root_dir, get_cache_root_dir,
+    get_multimodal_cache_dir, get_thumbnails_root_dir,
 };
 use crate::vcp_modules::infra::utils::{is_valid_cas_hash, now_secs, YieldCounter};
 use crate::vcp_modules::settings_manager::{read_settings, update_settings, SettingsState};
@@ -245,6 +245,7 @@ pub async fn reclaim_orphaned_attachments<R: tauri::Runtime>(
 }
 
 /// 辅助函数：异步深度遍历计算目录大小（带协作式 CPU 挂起出让，每 200 个文件出让一次时间片）
+#[cfg(not(target_os = "ios"))]
 async fn calculate_dir_size(path: &std::path::Path) -> u64 {
     let mut total_size = 0;
     let mut stack = vec![path.to_path_buf()];
@@ -268,15 +269,14 @@ async fn calculate_dir_size(path: &std::path::Path) -> u64 {
 }
 
 /// 清理 WebView HTTP 缓存，不触碰 LocalStorage 等应用持久状态。
+#[cfg(not(target_os = "ios"))]
 #[tauri::command]
 pub async fn clear_webview_cache(app: AppHandle) -> Result<String, String> {
     let mut cleared_details = String::new();
     let mut freed_size = 0u64;
 
-    let cache_dir = app
-        .path()
-        .app_cache_dir()
-        .map_err(|error| format!("WebView 缓存目录不可用: {error}"))?;
+    let cache_dir =
+        get_cache_root_dir(&app).map_err(|error| format!("WebView 缓存目录不可用: {error}"))?;
     let http_cache_dir = cache_dir.join("WebView").join("Default").join("HTTP Cache");
     if http_cache_dir.exists() {
         freed_size = calculate_dir_size(&http_cache_dir).await;
@@ -299,6 +299,12 @@ pub async fn clear_webview_cache(app: AppHandle) -> Result<String, String> {
     ))
 }
 
+#[cfg(target_os = "ios")]
+#[tauri::command]
+pub async fn clear_webview_cache(_app: AppHandle) -> Result<String, String> {
+    Err("not_implemented: 当前 iOS 版本尚不支持清理 WebView 缓存".to_string())
+}
+
 /// 3. 重建系统缓存与性能物理整理 (Level 3)
 /// 物理抹除 V8 code_cache 字节码编译缓存并运行 SQLite 碎片整理，坚决不清理同步日志诊断数据。
 #[tauri::command]
@@ -308,8 +314,9 @@ pub async fn reconstruct_system_cache(
 ) -> Result<String, String> {
     let mut cleared_details = String::new();
 
-    // 1. 强力物理抹除 V8 code_cache
-    if let Ok(cache_dir) = app.path().app_cache_dir() {
+    // 1. 保留 Android 和 host 开发分支原有 V8 清理；iOS WebKit 不使用此目录。
+    #[cfg(not(target_os = "ios"))]
+    if let Ok(cache_dir) = get_cache_root_dir(&app) {
         let code_cache_dir = cache_dir.join("code_cache");
         if code_cache_dir.exists() {
             if tokio::fs::remove_dir_all(&code_cache_dir).await.is_ok() {
@@ -321,16 +328,28 @@ pub async fn reconstruct_system_cache(
             cleared_details.push_str("V8 code_cache 无残余物理文件；");
         }
     }
+    #[cfg(target_os = "ios")]
+    let _ = app;
 
     // 2. SQLite 物理空间碎片真空整理与查询规划器优化
     // 分批回收 500 个 Page，避免造成单次大 Vacuum 导致长时间的 I/O 阻塞与锁竞争
-    let _ = db_state.run_incremental_vacuum_optimize(500).await;
+    db_state
+        .run_incremental_vacuum_optimize(500)
+        .await
+        .map_err(|error| format!("数据库维护失败: {error}"))?;
     cleared_details.push_str("SQLite 空间碎片整理与索引规划器重构已执行；");
 
-    Ok(format!(
+    #[cfg(not(target_os = "ios"))]
+    let result = format!(
         "系统缓存重建与数据库真空物理收缩完成 ({})",
         cleared_details.trim_end_matches('；')
-    ))
+    );
+    #[cfg(target_os = "ios")]
+    let result = format!(
+        "数据库维护完成 ({})",
+        cleared_details.trim_end_matches('；')
+    );
+    Ok(result)
 }
 
 /// 初始化自动维护逻辑（在 App 启动时调用）。
@@ -338,7 +357,7 @@ pub async fn init_automatic_maintenance(app: AppHandle) {
     // 异步清理超过 24 小时的孤立 SSE 缓存文件，防止磁盘文件泄露
     let app_clone = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let Ok(cache_dir) = app_clone.path().app_cache_dir() else {
+        let Ok(cache_dir) = get_cache_root_dir(&app_clone) else {
             return;
         };
         let sse_cache_dir = cache_dir.join("sse_cache");

@@ -5,6 +5,8 @@ import { shareFileNative } from "tauri-plugin-vcp-mobile";
 import { useSyncSessionStore } from "@/core/stores/syncSession";
 import { useOverlayStore } from "@/core/stores/overlay";
 import { useNotificationStore } from "@/core/stores/notification";
+import { configureAndroidPlatform, platformFixture } from "@/tests/fixtures/platform";
+import { usePlatformStore } from "@/core/stores/platform";
 import SyncSessionView from "@/features/sync/SyncSessionView.vue";
 import SyncLogBrowserCore from "@/features/settings/components/SyncLogBrowserCore.vue";
 import {
@@ -43,7 +45,9 @@ function syncError(
 
 describe("sync session ownership", () => {
   beforeEach(() => {
-    setActivePinia(createPinia());
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    configureAndroidPlatform(pinia);
     vi.mocked(shareFileNative).mockClear();
     mockInvoke("stop_sync", () => undefined);
     mockInvoke("plugin:vcp-mobile|get_battery_status", () => ({
@@ -58,6 +62,32 @@ describe("sync session ownership", () => {
       unreadCounts: {},
     }));
     mockInvoke("batch_get_avatars", () => []);
+  });
+
+  it("keeps a missing iOS battery adapter explicit and preserves warning-and-continue sync", async () => {
+    usePlatformStore().snapshot = platformFixture('ios');
+    const store = useSyncSessionStore();
+    store.open();
+    await store.startSync();
+    expect(invokeMock.mock.calls.some(([command]) => command === 'plugin:vcp-mobile|get_battery_status')).toBe(false);
+    expect(invokeMock.mock.calls.some(([command]) => command === 'start_manual_sync')).toBe(true);
+    expect(store.logs.some(log => log.message.includes('无法确认设备状态'))).toBe(true);
+    expect(store.logs.some(log => log.message === '设备状态检查完成')).toBe(false);
+    emitTauriEvent('vcp-sync-status', { sessionId: 1, status: 'error', error: syncError('END') });
+    await store.close();
+  });
+
+  it.each([
+    { level: 20, isPowerSaveMode: false, code: 'BATTERY_TOO_LOW' },
+    { level: 80, isPowerSaveMode: true, code: 'POWER_SAVE_MODE' },
+  ])("preserves the Android battery safeguard ($code)", async ({ level, isPowerSaveMode, code }) => {
+    mockInvoke('plugin:vcp-mobile|get_battery_status', () => ({ level, isPowerSaveMode }));
+    const store = useSyncSessionStore();
+    store.open();
+    await store.startSync();
+    expect(store.terminalError?.code).toBe(code);
+    expect(invokeMock.mock.calls.some(([command]) => command === 'start_manual_sync')).toBe(false);
+    await store.close();
   });
 
   it("unlistens registrations that resolve after the panel closes", async () => {

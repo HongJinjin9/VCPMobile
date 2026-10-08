@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { useAppLifecycleStore } from '../../core/stores/appLifecycle';
+import { usePlatformStore } from '../../core/stores/platform';
 import type {
   DiskSpaceDto,
   ListenerPermissionDto,
@@ -9,6 +10,7 @@ import type {
 } from '../../core/types/native';
 
 const lifecycleStore = useAppLifecycleStore();
+const platformStore = usePlatformStore();
 
 const status = ref<PermissionStatusDto>({
   notification: false,
@@ -55,6 +57,7 @@ const step2Ready = computed(() => isPowerReady.value && isListenerReady.value);
 const isStorageSpaceOk = computed(() => freeDiskSpaceGB.value >= 5.0);
 
 const check = async () => {
+  if (!platformStore.isImplemented('androidPermissionGate')) return;
   try {
     const res = await invoke<PermissionStatusDto>('plugin:vcp-mobile|check_all_permissions');
     status.value = res;
@@ -71,6 +74,7 @@ const check = async () => {
 };
 
 const checkDiskSpace = async () => {
+  if (!platformStore.isImplemented('androidPermissionGate')) return;
   try {
     const res = await invoke<DiskSpaceDto>('plugin:vcp-mobile|get_free_disk_space');
     freeDiskSpaceGB.value = res.freeGb;
@@ -83,6 +87,7 @@ const checkDiskSpace = async () => {
 };
 
 const request = async (type: 'notification' | 'battery') => {
+  platformStore.require('androidPermissionGate');
   try {
     await invoke('plugin:vcp-mobile|request_android_permission', { pType: type });
   } catch (e) {
@@ -91,6 +96,7 @@ const request = async (type: 'notification' | 'battery') => {
 };
 
 const triggerPowerManagementSettings = async () => {
+  platformStore.require('androidPermissionGate');
   try {
     await invoke('plugin:vcp-mobile|request_power_management_permission');
     hasClickedPower.value = true;
@@ -100,6 +106,7 @@ const triggerPowerManagementSettings = async () => {
 };
 
 const triggerNotificationListenerSettings = async () => {
+  platformStore.require('androidPermissionGate');
   try {
     await invoke('plugin:vcp-mobile|request_notification_listener_permission');
     hasClickedListener.value = true;
@@ -109,6 +116,7 @@ const triggerNotificationListenerSettings = async () => {
 };
 
 const exitApp = async () => {
+  platformStore.require('moveTaskToBack');
   try {
     await invoke('plugin:vcp-mobile|move_task_to_back');
   } catch (e) {
@@ -133,6 +141,7 @@ const onVisibilityChange = () => {
 };
 
 onMounted(() => {
+  if (!platformStore.isImplemented('androidPermissionGate')) return;
   check();
   // 当应用从后台切回前台时重检（用户在设置页操作后返回）
   window.addEventListener('visibilitychange', onVisibilityChange);

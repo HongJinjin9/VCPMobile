@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue';
 import { useSettingsStore } from '../stores/settings';
 import { useAudioRecorder } from './useAudioRecorder';
+import { usePlatformStore } from '../stores/platform';
 
 export function useSpeechRecognition() {
   const settingsStore = useSettingsStore();
@@ -80,14 +81,15 @@ export function useSpeechRecognition() {
    * 开启语音输入
    */
   const startListening = async (onResultCallback: (text: string) => void): Promise<void> => {
+    const platformStore = usePlatformStore();
+    platformStore.require('voiceRecording');
     transcriptionResult.value = '';
     interimTranscription.value = '';
 
     // 1. 如果支持原生且未激活降级，首选本地 Google 流式转文字
     if (isNativeSupported.value && !isFallbackMode.value) {
       try {
-        const isAndroid = navigator.userAgent.toLowerCase().includes('android');
-        if (isAndroid) {
+        if (platformStore.platform === 'android') {
           try {
             // 主动在原生端触发 Android 麦克风录音权限弹窗申请
             const { invoke } = await import('@tauri-apps/api/core');

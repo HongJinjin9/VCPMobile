@@ -1,6 +1,6 @@
 use crate::vcp_modules::db_manager::DbState;
 use sha2::{Digest, Sha256};
-use tauri::{AppHandle, Manager, Runtime, State};
+use tauri::{AppHandle, Runtime, State};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::{Duration, Instant};
@@ -39,11 +39,7 @@ pub async fn prepare_vcp_upload<R: Runtime>(
 ) -> Result<UploadEndpoint, String> {
     validate_upload_metadata(&metadata)?;
 
-    let mut temp_dir = app_handle
-        .path()
-        .app_cache_dir()
-        .map_err(|e| e.to_string())?;
-    temp_dir.push("uploads");
+    let temp_dir = crate::vcp_modules::file_manager::get_upload_staging_dir(&app_handle)?;
     tokio::fs::create_dir_all(&temp_dir)
         .await
         .map_err(|e| e.to_string())?;

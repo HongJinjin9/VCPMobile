@@ -1,0 +1,32 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "android-main",
+  "description": "Android native commands consumed by the main frontend; Rust internal calls do not need frontend grants",
+  "windows": ["main"],
+  "platforms": ["android"],
+  "permissions": [
+    "core:window:allow-close",
+    "vcp-mobile:allow-check-all-permissions",
+    "vcp-mobile:allow-request-android-permission",
+    "vcp-mobile:allow-move-task-to-back",
+    "vcp-mobile:allow-check-notification-listener-permission",
+    "vcp-mobile:allow-request-notification-listener-permission",
+    "vcp-mobile:allow-request-power-management-permission",
+    "vcp-mobile:allow-get-free-disk-space",
+    "vcp-mobile:allow-pick-file",
+    "vcp-mobile:allow-get-battery-status",
+    "vcp-mobile:allow-open-file-native",
+    "vcp-mobile:allow-save-image-to-gallery",
+    "vcp-mobile:allow-save-to-downloads",
+    "vcp-mobile:allow-write-temp-file",
+    "vcp-mobile:allow-delete-temp-file",
+    "vcp-mobile:allow-start-download-notification",
+    "vcp-mobile:allow-update-download-notification",
+    "vcp-mobile:allow-cancel-download-notification",
+    "vcp-mobile:allow-get-pending-notification",
+    "vcp-mobile:allow-register-shared-files",
+    "vcp-mobile:allow-check-root-access",
+    "vcp-mobile:allow-launch-root-manager",
+    "vcp-mobile:allow-open-unknown-sources-settings"
+  ]
+}

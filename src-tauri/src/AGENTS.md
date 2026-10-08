@@ -76,6 +76,8 @@ app 层 Tauri command 统一在 `commands.rs` 的 `app_command_handler!` 中导�
 
 `plugin:*` 命令属于 Tauri 插件路径，不经过 app command 清单；修改 `vcp-mobile` 插件时遵循 `../plugins/vcp-mobile/AGENTS.md`。
 
+`infra/platform.rs` 提供编译目标与 typed 平台能力；原生副作用的领域 command 同时检查能力，不能只依赖 UI 隐藏。当前 app command 总闸仅接受 `main` WebView；插件/core 命令另由分平台 capability 文件授权。生命周期 phase/nativeSequence/snapshot 经原 Rust owner 归约，native sequence 与 Rust transition epoch 分别排序。
+
 ### 4.2 JavaBridge 栈边界
 
 中央 handler 在 JavaBridge 线程上只接收 `Invoke`，随后把完整命令匹配、参数反序列化与 future 构造交给 Tauri async worker。不得绕过这个总闸注册 app 命令，也不得为单个复杂命令重新增加 future 壳或尺寸判断；保持一次中央 offload 和一条响应通道。

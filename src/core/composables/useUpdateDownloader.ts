@@ -2,6 +2,7 @@ import { computed, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { useNotificationStore } from '../stores/notification';
 import { useUpdateStore } from '../stores/update';
+import { usePlatformStore } from '../stores/platform';
 
 const formatBytes = (bytes: number) => {
   if (bytes === 0) return '0 B';
@@ -18,18 +19,20 @@ const formatBytes = (bytes: number) => {
 export function useUpdateDownloader() {
   const notificationStore = useNotificationStore();
   const updateStore = useUpdateStore();
+  const platformStore = usePlatformStore();
 
   const isDownloading = computed(() =>
     ['downloading', 'verifying'].includes(updateStore.state),
   );
 
   const downloadAndInstall = async () => {
+    platformStore.require('apkUpdate');
     if (updateStore.state === 'downloading' || updateStore.state === 'verifying') {
       console.log('[UpdateDownloader] Refused: download already in progress.');
       return;
     }
 
-    const isAndroid = navigator.userAgent.toLowerCase().includes('android');
+    const hasSystemNotifications = platformStore.isImplemented('systemNotifications');
 
     notificationStore.addNotification({
       title: '发起更新下载',
@@ -41,7 +44,7 @@ export function useUpdateDownloader() {
 
     // Android 13+ 的通知权限只在用户真正开始 OTA 下载时申请。
     // 拒绝通知不阻断下载，应用内进度与系统安装器仍可正常工作。
-    if (isAndroid) {
+    if (hasSystemNotifications) {
       await invoke('plugin:vcp-mobile|request_android_permission', { pType: 'notification' }).catch((e) => {
         console.warn('[UpdateDownloader] notification permission unavailable:', e);
       });
@@ -55,7 +58,7 @@ export function useUpdateDownloader() {
     const stopWatch = watch(
       () => [updateStore.status.downloaded, updateStore.status.total] as const,
       ([downloaded, total]) => {
-        if (!isAndroid) return;
+        if (!hasSystemNotifications) return;
         const percent = total ? Math.round((downloaded / total) * 100) : 0;
         const text = total
           ? `已下载 ${percent}% (${formatBytes(downloaded)} / ${formatBytes(total)})`
@@ -116,7 +119,7 @@ export function useUpdateDownloader() {
       throw e;
     } finally {
       stopWatch();
-      if (isAndroid) {
+      if (hasSystemNotifications) {
         await invoke('plugin:vcp-mobile|cancel_download_notification').catch(() => {});
       }
     }

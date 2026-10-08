@@ -7,6 +7,7 @@ import { useChatStreamStore } from '../../core/stores/chatStreamStore';
 import { useAttachmentStore } from '../../core/stores/attachmentStore';
 import { useNotificationStore } from '../../core/stores/notification';
 import { useTarvenStore } from '../../core/stores/tarvenStore';
+import { usePlatformStore } from '../../core/stores/platform';
 import { useLongTextPaste } from './composables/useLongTextPaste';
 import { useSpeechRecognition } from '../../core/composables/useSpeechRecognition';
 import { useAudioRecorder } from '../../core/composables/useAudioRecorder';
@@ -20,6 +21,7 @@ import { splitMentionSegments } from '../../core/utils/mention';
 import type { AttachmentData } from '../../core/types/chat';
 
 const tarvenStore = useTarvenStore();
+const platformStore = usePlatformStore();
 
 const openTarvenSelector = () => {
   if (props.disabled) return;
@@ -79,7 +81,7 @@ let iconLongPressTimeout: number | null = null;
 
 // 切换语音模式与普通文本模式
 const toggleAudioMode = () => {
-  if (props.disabled) return;
+  if (props.disabled || !platformStore.isImplemented('voiceRecording')) return;
   
   attachMenuOpen.value = false;
   
@@ -110,7 +112,7 @@ const toggleAudioMode = () => {
 // 交互 A：在“按住 说话”大长条上的 STT 手势管理
 // ----------------------------------------------------
 const handleSTTTouchStart = async (e: TouchEvent) => {
-  if (props.disabled) return;
+  if (props.disabled || !platformStore.isImplemented('voiceRecording')) return;
   if (e.cancelable) e.preventDefault(); // 阻断默认上下文菜单与滚动
 
   isSTTActive.value = true;
@@ -190,7 +192,7 @@ const handleSTTTouchCancel = (e: TouchEvent) => {
 // 交互 B：直接长按左侧语音按钮，进行附件录制并松手直发
 // ----------------------------------------------------
 const handleIconTouchStart = (e: TouchEvent) => {
-  if (props.disabled) return;
+  if (props.disabled || !platformStore.isImplemented('voiceRecording')) return;
   
   // 核心修复：如果当前已经处于“按住说话”模式，点击此按钮是为了切回键盘，直接触发 Tap 切换！
   // 彻底解决了由于 touchstart.prevent 导致 click 无法触发的“点不回去”手势缺陷！
@@ -574,7 +576,8 @@ onUnmounted(() => {
       >
         
         <!-- 左侧：语音/键盘切换及长按附件录制按钮 -->
-        <button 
+        <button
+          v-if="platformStore.isImplemented('voiceRecording')"
           @touchstart.prevent="handleIconTouchStart"
           @touchmove="handleIconTouchMove"
           @touchend="handleIconTouchEnd"
@@ -773,7 +776,7 @@ onUnmounted(() => {
         :class="attachMenuOpen ? 'translate-y-0 opacity-100 scale-100' : 'translate-y-4 opacity-0 scale-95'"
       >
         <!-- 拍摄按钮 -->
-        <button @click="triggerFilePick('camera')" 
+        <button v-if="platformStore.isImplemented('camera')" @click="triggerFilePick('camera')"
           class="group flex flex-col items-center gap-1.5 active:scale-95 transition-all outline-none"
         >
           <div class="w-13 h-13 flex items-center justify-center rounded-2xl bg-black/5 dark:bg-white/5 border border-[var(--border-color)]/30 group-hover:border-[var(--highlight-text)]/40 transition-all shadow-inner">

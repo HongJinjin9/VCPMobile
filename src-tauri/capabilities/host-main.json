@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "host-main",
+  "description": "Development-host window close; the host is not a product platform",
+  "windows": ["main"],
+  "platforms": ["windows", "macOS", "linux"],
+  "permissions": [
+    "core:window:allow-close"
+  ]
+}

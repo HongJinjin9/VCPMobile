@@ -3,6 +3,9 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
+use tauri_plugin_vcp_mobile::events::LifecyclePhase;
+#[cfg(any(target_os = "android", test))]
+use tauri_plugin_vcp_mobile::events::NativeLifecycleEvent;
 
 use crate::vcp_modules::infra::local_server::ServerHandle;
 
@@ -21,6 +24,50 @@ pub struct DatabaseRecoveryNotice {
     pub message: String,
     pub archive_path: String,
     pub recovered_at: i64,
+}
+
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LifecycleSnapshot {
+    pub phase: LifecyclePhase,
+    pub native_sequence: Option<u64>,
+    pub snapshot: bool,
+    pub transition_epoch: u64,
+}
+
+impl LifecycleSnapshot {
+    #[cfg(any(target_os = "android", test))]
+    pub fn from_native(event: NativeLifecycleEvent, transition_epoch: u64) -> Self {
+        Self {
+            phase: event.phase,
+            native_sequence: Some(event.native_sequence),
+            snapshot: event.snapshot,
+            transition_epoch,
+        }
+    }
+
+    pub fn as_snapshot(mut self) -> Self {
+        self.snapshot = true;
+        self
+    }
+}
+
+#[derive(Default)]
+#[cfg(any(target_os = "android", test))]
+pub struct NativeLifecycleOrdering {
+    last_sequence: Option<u64>,
+}
+
+#[cfg(any(target_os = "android", test))]
+impl NativeLifecycleOrdering {
+    /// Accept the first snapshot even when the native source has not transitioned (0).
+    pub fn accept(&mut self, sequence: u64) -> bool {
+        if self.last_sequence.is_some_and(|last| sequence <= last) {
+            return false;
+        }
+        self.last_sequence = Some(sequence);
+        true
+    }
 }
 
 pub struct LingerController {
@@ -53,6 +100,11 @@ pub struct LifecycleState {
     pub local_server_handle: Arc<tokio::sync::Mutex<Option<ServerHandle>>>,
     /// 应用前台状态，统一替代原裸静态全局变量
     pub is_foreground: Arc<AtomicBool>,
+    /// None until an actual native/host event has reached the authoritative owner.
+    pub lifecycle_snapshot: RwLock<Option<LifecycleSnapshot>>,
+    /// Native delivery ordering is checked before allocating a Rust transition epoch.
+    #[cfg(target_os = "android")]
+    pub native_lifecycle_ordering: std::sync::Mutex<NativeLifecycleOrdering>,
     /// 统一后台 Linger 延时断连任务状态与控制器
     pub linger: Arc<LingerController>,
 }
@@ -66,7 +118,44 @@ impl LifecycleState {
             database_recovery: Arc::new(RwLock::new(None)),
             local_server_handle: Arc::new(tokio::sync::Mutex::new(None)),
             is_foreground: Arc::new(AtomicBool::new(true)),
+            lifecycle_snapshot: RwLock::new(None),
+            #[cfg(target_os = "android")]
+            native_lifecycle_ordering: std::sync::Mutex::new(NativeLifecycleOrdering::default()),
             linger: Arc::new(LingerController::new()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_replay_and_out_of_order_events_cannot_reserve_a_new_transition() {
+        let mut ordering = NativeLifecycleOrdering::default();
+        assert!(ordering.accept(0));
+        assert!(!ordering.accept(0));
+        assert!(ordering.accept(4));
+        assert!(!ordering.accept(3));
+        assert!(!ordering.accept(4));
+        assert!(ordering.accept(5));
+    }
+
+    #[test]
+    fn snapshot_preserves_native_identity_and_independent_rust_epoch() {
+        let native = NativeLifecycleEvent {
+            phase: LifecyclePhase::Inactive,
+            native_sequence: 8,
+            snapshot: false,
+        };
+        let snapshot = LifecycleSnapshot::from_native(native, 3).as_snapshot();
+        assert_eq!(
+            serde_json::to_value(snapshot).unwrap(),
+            serde_json::json!({
+                "phase": "inactive", "nativeSequence": 8,
+                "snapshot": true, "transitionEpoch": 3,
+            }),
+        );
+        assert!(LifecycleState::new().lifecycle_snapshot.try_read().unwrap().is_none());
     }
 }

@@ -36,6 +36,9 @@ fn set_manual_screen_owner<R: Runtime>(app: &AppHandle<R>, requested: bool) -> R
 #[tauri::command]
 #[allow(unused_variables)]
 pub fn set_keep_screen_on<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    #[cfg(target_os = "ios")]
+    crate::ios_not_implemented::<()>("set_keep_screen_on")?;
+
     #[cfg(target_os = "android")]
     {
         set_manual_screen_owner(&app, true)?;
@@ -48,6 +51,9 @@ pub fn set_keep_screen_on<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
 #[tauri::command]
 #[allow(unused_variables)]
 pub fn clear_keep_screen_on<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    #[cfg(target_os = "ios")]
+    crate::ios_not_implemented::<()>("clear_keep_screen_on")?;
+
     #[cfg(target_os = "android")]
     {
         set_manual_screen_owner(&app, false)?;

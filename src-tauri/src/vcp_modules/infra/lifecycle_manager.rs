@@ -13,10 +13,10 @@ use crate::vcp_modules::sync_service::init_sync_service;
 use crate::vcp_modules::vcp_log_service::init_vcp_log_connection_internal;
 
 // Re-export submodules to preserve public API compatibility
-#[allow(unused_imports)]
+pub use crate::vcp_modules::infra::lifecycle_controller::is_app_in_foreground;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub use crate::vcp_modules::infra::lifecycle_controller::{
-    is_app_in_foreground, reserve_lifecycle_transition, set_app_foreground_state,
-    set_app_foreground_state_for_epoch, set_app_foreground_state_internal,
+    reserve_lifecycle_transition, set_app_foreground_state_for_epoch,
 };
 pub use crate::vcp_modules::infra::lifecycle_reconciler::{
     reconcile_distributed_node, reconcile_local_server,
@@ -124,21 +124,27 @@ pub async fn bootstrap(app: &AppHandle) -> Result<(), String> {
     // Tool authorization is an offline policy and must be ready before any catalog read or
     // network reconciliation. Distributed being disabled must not hide persisted grants or
     // migration warnings from the plugin center.
-    let distributed_state = handle.state::<crate::distributed::DistributedState>();
-    let tool_config_status = distributed_state
-        .registry
-        .ensure_enabled_config_loaded(&handle)
-        .await;
-    if tool_config_status.state != crate::distributed::tool_registry::ToolConfigState::Ready {
-        log::warn!(
-            "[Lifecycle] Distributed tool authorization loaded fail-closed: {:?}",
-            tool_config_status
-        );
+    if crate::vcp_modules::infra::platform::is_implemented(
+        crate::vcp_modules::infra::platform::CapabilityName::Distributed,
+    ) {
+        let distributed_state = handle.state::<crate::distributed::DistributedState>();
+        let tool_config_status = distributed_state
+            .registry
+            .ensure_enabled_config_loaded(&handle)
+            .await;
+        if tool_config_status.state != crate::distributed::tool_registry::ToolConfigState::Ready {
+            log::warn!(
+                "[Lifecycle] Distributed tool authorization loaded fail-closed: {:?}",
+                tool_config_status
+            );
+        }
     }
     crate::vcp_modules::boot_trace::boot_mark(&handle, "rs:tool_auth_done");
 
     // 3.6 根据设置决定是否启动分布式节点 (自动重连)
-    {
+    if crate::vcp_modules::infra::platform::is_implemented(
+        crate::vcp_modules::infra::platform::CapabilityName::Distributed,
+    ) {
         let enable_dist = settings.distributed_enabled;
         log::info!(
             "[Lifecycle] distributedEnabled={}, reconciling distributed node...",
@@ -294,20 +300,13 @@ pub async fn bootstrap(app: &AppHandle) -> Result<(), String> {
             let event_handle = handle_net.clone();
             if let Err(error) =
                 tauri_plugin_vcp_mobile::events::subscribe(&handle_net, move |event| {
-                    use tauri_plugin_vcp_mobile::events::{NativeEvent, NativeLifecycleState};
+                    use tauri_plugin_vcp_mobile::events::NativeEvent;
                     // JNI 回调只安排任务，不在 Android 主线程等待原生命令返回。
                     match event {
-                        NativeEvent::Lifecycle { state } => {
-                            let foreground = match state {
-                                NativeLifecycleState::Resume => true,
-                                NativeLifecycleState::Pause | NativeLifecycleState::Stop => false,
-                                NativeLifecycleState::Other => return,
-                            };
-                            let epoch = reserve_lifecycle_transition();
-                            let app = event_handle.clone();
-                            tauri::async_runtime::spawn(async move {
-                                set_app_foreground_state_for_epoch(app, foreground, epoch).await;
-                            });
+                        NativeEvent::Lifecycle(event) => {
+                            crate::vcp_modules::infra::lifecycle_controller::enqueue_native_lifecycle_event(
+                                event_handle.clone(), event,
+                            );
                         }
                         NativeEvent::Network { connected: true } => {
                             let app = event_handle.clone();
@@ -319,7 +318,7 @@ pub async fn bootstrap(app: &AppHandle) -> Result<(), String> {
                                 }
                             });
                         }
-                        NativeEvent::Network { connected: false } => {}
+                        NativeEvent::Network { connected: false } | NativeEvent::Other {} => {}
                     }
                 })
                 .await
@@ -342,6 +341,7 @@ pub struct SystemSnapshot {
     pub message: String,
     pub log: String,
     pub sync: String,
+    pub lifecycle: Option<crate::vcp_modules::infra::lifecycle_state::LifecycleSnapshot>,
     #[serde(rename = "databaseRecovery")]
     pub database_recovery:
         Option<crate::vcp_modules::infra::lifecycle_state::DatabaseRecoveryNotice>,
@@ -372,6 +372,7 @@ pub async fn get_system_snapshot(
         message,
         log,
         sync,
+        lifecycle: state.lifecycle_snapshot.read().await.map(|value| value.as_snapshot()),
         database_recovery,
         background_service_failures: tauri_plugin_vcp_mobile::events::take_service_failures(&app),
     })
@@ -396,6 +397,9 @@ pub async fn reconcile_local_server_cmd(
 
 #[tauri::command]
 pub async fn reconcile_distributed_node_cmd(app_handle: AppHandle) -> Result<bool, String> {
+    crate::vcp_modules::infra::platform::require_capability(
+        crate::vcp_modules::infra::platform::CapabilityName::Distributed,
+    )?;
     let settings_state = app_handle.state::<SettingsState>();
     let _runtime_guard = settings_state.lock_runtime_reconcile().await;
     let settings = read_settings(app_handle.clone(), app_handle.state())
@@ -460,7 +464,12 @@ pub async fn restart_or_exit_app(
         std::process::exit(0);
     }
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        Err("unsupported: iOS does not support restarting or exiting the application by command".to_string())
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         std::process::exit(0);
     }

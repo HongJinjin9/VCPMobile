@@ -32,6 +32,11 @@ pub async fn reconcile_local_server(
 
 /// 根据设置决定启动或停止分布式节点连接
 pub async fn reconcile_distributed_node(app_handle: &AppHandle, force_reconnect: bool) {
+    if !crate::vcp_modules::infra::platform::is_implemented(
+        crate::vcp_modules::infra::platform::CapabilityName::Distributed,
+    ) {
+        return;
+    }
     let distributed_state = match app_handle.try_state::<crate::distributed::DistributedState>() {
         Some(s) => s,
         None => {

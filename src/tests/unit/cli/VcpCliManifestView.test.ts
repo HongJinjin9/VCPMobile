@@ -21,6 +21,7 @@ import {
 import { invokeMock, mockInvoke } from "@/tests/mocks/tauri";
 import { flushPromises } from "@/tests/utils/flush";
 import { mountWithPinia } from "@/tests/utils/mount";
+import { configureAndroidPlatform } from "@/tests/fixtures/platform";
 
 const canonicalManifest = cliManifestGoldenSource.trimEnd();
 const manifestFixture = JSON.parse(canonicalManifest) as Record<
@@ -32,7 +33,7 @@ function mountView() {
   return mountWithPinia(VcpCliManifestView, {
     props: { isOpen: true, zIndex: 44 },
     global: { stubs: { VcpCliTerminalPanel: true } },
-  });
+  }, configureAndroidPlatform);
 }
 
 function mountViewWithAllPanelsStubbed() {
@@ -45,7 +46,7 @@ function mountViewWithAllPanelsStubbed() {
         VcpCliSkillsPanel: true,
       },
     },
-  });
+  }, configureAndroidPlatform);
 }
 
 const readyStatus: VcpCliRuntimeStatus = {

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use tauri::Manager;
 use tauri::{AppHandle, Runtime};
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 const PROCESS_HOST_UNAVAILABLE: &str = "VCPMobileCLI ProcessHost is only available on Android";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -252,7 +252,12 @@ pub async fn prepare_cli_runtime_inner<R: Runtime>(
             .map_err(|error| format!("prepareCliRuntime failed: {error}"));
     }
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = (app, request);
+        crate::ios_unsupported("prepare_cli_runtime")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = (app, request);
         Err(PROCESS_HOST_UNAVAILABLE.to_string())
@@ -272,7 +277,12 @@ pub async fn start_cli_process_inner<R: Runtime>(
             .map_err(|error| format!("startCliProcess failed: {error}"));
     }
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = (app, request);
+        crate::ios_unsupported("start_cli_process")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = (app, request);
         Err(PROCESS_HOST_UNAVAILABLE.to_string())
@@ -292,7 +302,12 @@ pub async fn inspect_cli_process_inner<R: Runtime>(
             .map_err(|error| format!("inspectCliProcess failed: {error}"));
     }
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = (app, request);
+        crate::ios_unsupported("inspect_cli_process")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = (app, request);
         Err(PROCESS_HOST_UNAVAILABLE.to_string())
@@ -312,7 +327,12 @@ pub async fn cancel_cli_process_inner<R: Runtime>(
             .map_err(|error| format!("cancelCliProcess failed: {error}"));
     }
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let _ = (app, request);
+        crate::ios_unsupported("cancel_cli_process")
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = (app, request);
         Err(PROCESS_HOST_UNAVAILABLE.to_string())
@@ -333,7 +353,12 @@ macro_rules! pty_bridge {
                     .await
                     .map_err(|error| format!(concat!($method, " failed: {}"), error));
             }
-            #[cfg(not(target_os = "android"))]
+            #[cfg(target_os = "ios")]
+            {
+                let _ = (app, request);
+                crate::ios_unsupported(stringify!($name))
+            }
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
                 let _ = (app, request);
                 Err(PROCESS_HOST_UNAVAILABLE.to_string())

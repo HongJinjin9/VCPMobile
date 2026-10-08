@@ -7,19 +7,29 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 #[serde(tag = "event", content = "payload")]
 pub enum NativeEvent {
     #[serde(rename = "lifecycle")]
-    Lifecycle { state: NativeLifecycleState },
+    Lifecycle(NativeLifecycleEvent),
     #[serde(rename = "network")]
     Network { connected: bool },
+    // Configuration/memory notifications do not describe an app phase.
+    #[serde(rename = "configuration", alias = "memory-pressure")]
+    Other {},
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
-pub enum NativeLifecycleState {
-    Resume,
-    Pause,
-    Stop,
-    #[serde(other)]
-    Other,
+pub enum LifecyclePhase {
+    Active,
+    Inactive,
+    Background,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeLifecycleEvent {
+    pub phase: LifecyclePhase,
+    /// Monotonic within the native process event source; independent of Rust epochs.
+    pub native_sequence: u64,
+    pub snapshot: bool,
 }
 
 /// One native subscription per process. The Channel callback runs on the native
@@ -98,16 +108,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn decodes_native_channel_snapshots_and_ignores_non_transition_states() {
+    fn decodes_native_channel_snapshots_and_ignores_non_transition_events() {
         let pause: NativeEvent = serde_json::from_value(serde_json::json!({
-            "event": "lifecycle", "payload": { "state": "pause", "epoch": 3 }
+            "event": "lifecycle",
+            "payload": { "phase": "background", "nativeSequence": 3, "snapshot": true }
         }))
         .unwrap();
         assert!(matches!(
             pause,
-            NativeEvent::Lifecycle {
-                state: NativeLifecycleState::Pause
-            }
+            NativeEvent::Lifecycle(NativeLifecycleEvent {
+                phase: LifecyclePhase::Background,
+                native_sequence: 3,
+                snapshot: true,
+            })
         ));
         let network: NativeEvent = serde_json::from_value(serde_json::json!({
             "event": "network", "payload": { "connected": true }
@@ -115,18 +128,26 @@ mod tests {
         .unwrap();
         assert!(matches!(network, NativeEvent::Network { connected: true }));
         let configuration: NativeEvent = serde_json::from_value(serde_json::json!({
-            "event": "lifecycle", "payload": { "state": "config-changed" }
+            "event": "configuration", "payload": { "isDarkMode": true }
         }))
         .unwrap();
         assert!(matches!(
             configuration,
-            NativeEvent::Lifecycle {
-                state: NativeLifecycleState::Other
-            }
+            NativeEvent::Other {}
         ));
         assert!(serde_json::from_value::<NativeEvent>(serde_json::json!({
             "event": "network", "payload": { "connected": "true" }
         }))
         .is_err());
+        for payload in [
+            serde_json::json!({ "phase": "active", "snapshot": false }),
+            serde_json::json!({ "phase": "resume", "nativeSequence": 4, "snapshot": false }),
+            serde_json::json!({ "phase": "background", "nativeSequence": -1, "snapshot": false }),
+        ] {
+            assert!(serde_json::from_value::<NativeEvent>(serde_json::json!({
+                "event": "lifecycle", "payload": payload,
+            }))
+            .is_err());
+        }
     }
 }

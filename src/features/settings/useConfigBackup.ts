@@ -5,6 +5,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { AppSettings } from "../../core/stores/settings";
 import type { DownloadsSaveResultDto } from "../../core/types/native";
+import { usePlatformStore } from "../../core/stores/platform";
 
 export const CONFIG_BACKUP_KIND = "vcp-mobile-settings-backup";
 export const CONFIG_BACKUP_VERSION = 1;
@@ -203,6 +204,7 @@ async function invokeSaveToDownloads(
 export async function exportConfigBackup(
   settings: AppSettings,
 ): Promise<DownloadsSaveResultDto> {
+  usePlatformStore().require('fileExport');
   const payload = buildBackupPayload(settings);
   const contentBase64 = bytesToBase64(new TextEncoder().encode(JSON.stringify(payload, null, 2)));
   const fileName = buildBackupFileName();
@@ -211,7 +213,7 @@ export async function exportConfigBackup(
     return await invokeSaveToDownloads(fileName, contentBase64);
   } catch (e: any) {
     const message = String(e);
-    if (!message.includes("储存空间权限")) throw e;
+    if (usePlatformStore().platform !== 'android' || !message.includes("储存空间权限")) throw e;
     // API 26–28：引导用户授予储存空间权限后重试一次
     await invoke("plugin:vcp-mobile|request_android_permission", { pType: "storage" });
     return await invokeSaveToDownloads(fileName, contentBase64);

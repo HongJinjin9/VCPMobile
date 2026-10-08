@@ -6,6 +6,7 @@ import { useAssistantStore } from "../../core/stores/assistant";
 import { useChatSessionStore } from "../../core/stores/chatSessionStore";
 import { useNotificationStore } from "../../core/stores/notification";
 import { useOverlayStore } from "../../core/stores/overlay";
+import { usePlatformStore } from "../../core/stores/platform";
 import SlidePage from "../../components/ui/SlidePage.vue";
 import ModelSelector from "../../components/ModelSelector.vue";
 import AvatarCropper from "../../components/ui/AvatarCropper.vue";
@@ -122,6 +123,7 @@ const triggerFileInput = async () => {
 
   isPickingAvatar.value = true;
   try {
+    usePlatformStore().require('photoPicker');
     await releaseAvatarWorkingCopy();
     const picked = await pickFile("avatar");
     if (!isOpenEditorCurrent(epoch, groupId)) {

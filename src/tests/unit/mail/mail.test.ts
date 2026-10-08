@@ -19,6 +19,8 @@ import {
   renderMailMarkdown,
 } from '@/features/mail/mailTypes';
 import { useMailStore } from '@/features/mail/mailStore';
+import { usePlatformStore } from '@/core/stores/platform';
+import { platformFixture } from '@/tests/fixtures/platform';
 import { clearInvokeMocks, mockInvoke } from '../../mocks/tauri';
 
 const baseState = () => ({
@@ -311,6 +313,35 @@ describe('邮箱 · V1.1（补丁端点）', () => {
     store.clearSearch();
     expect(store.displayedMails).toHaveLength(2);
     store.stopSession();
+  });
+
+  it.each(['android', 'ios'] as const)('%s 附件导出门禁不影响读取正文与附件元数据', async (platform) => {
+    usePlatformStore().snapshot = platformFixture(platform);
+    mockBase();
+    const calls: string[] = [];
+    mockInvoke('mail_read', () => ({
+      markdown: '', text: '邮件正文',
+      attachments: [{ partId: 'part-1', filename: 'note.txt', contentType: 'text/plain', size: 4 }],
+    }));
+    mockInvoke('mail_attachment', () => {
+      calls.push('download');
+      return { dataBase64: 'dGVzdA==', filename: 'note.txt', contentType: 'text/plain' };
+    });
+    mockInvoke('plugin:vcp-mobile|save_to_downloads', () => {
+      calls.push('export');
+      return { displayName: 'note.txt' };
+    });
+    const store = useMailStore();
+    await store.startSession();
+    try {
+      await store.openDetail('msg_001');
+      await store.downloadAttachment('msg_001', 'part-1', 'note.txt');
+      expect(store.detail?.text).toBe('邮件正文');
+      expect(store.detail?.attachments[0]?.filename).toBe('note.txt');
+      expect(calls).toEqual(platform === 'android' ? ['download', 'export'] : []);
+    } finally {
+      store.stopSession();
+    }
   });
 
   it('setRead(false) 标为未读并同步列表状态', async () => {

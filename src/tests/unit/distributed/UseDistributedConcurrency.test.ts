@@ -1,4 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createPinia, setActivePinia } from "pinia";
+import { configureAndroidPlatform, platformFixture } from "@/tests/fixtures/platform";
+import { usePlatformStore } from "@/core/stores/platform";
 import {
   useDistributed,
   type DistributedStatus,
@@ -34,6 +37,21 @@ function distributedStatus(
 }
 
 describe("distributed listener ownership", () => {
+  beforeEach(() => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    configureAndroidPlatform(pinia);
+  });
+
+  it("does not subscribe or query native services on iOS", async () => {
+    usePlatformStore().snapshot = platformFixture('ios');
+    const distributed = useDistributed();
+    await distributed.activate();
+    await distributed.refreshStatus();
+    expect(listenMock).not.toHaveBeenCalled();
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
   it("allows listener setup to retry after a rejected registration", async () => {
     listenMock.mockRejectedValueOnce(new Error("registration failed"));
     mockInvoke("get_distributed_status", () =>

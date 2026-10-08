@@ -9,6 +9,8 @@ import { useChatSessionStore } from './chatSessionStore';
 import { useChatHistoryStore } from './chatHistoryStore';
 import { useTopicStore } from './topicListManager';
 import { useAvatarStore } from './avatar';
+import { usePlatformStore } from './platform';
+import { selectLatestLifecycleSnapshot, type LifecycleSnapshotDto } from '../types/lifecycle';
 import type {
   ListenerPermissionDto,
   PermissionStatusDto,
@@ -30,6 +32,7 @@ interface DatabaseRecoveryNotice {
 }
 
 interface SystemSnapshotDto {
+  lifecycle: LifecycleSnapshotDto | null;
   core: 'initializing' | 'optimizing' | 'ready' | 'error';
   message: string;
   log: Extract<VcpStatus['status'], 'closed' | 'connecting' | 'connected' | 'error'>;
@@ -49,7 +52,11 @@ export const useAppLifecycleStore = defineStore('appLifecycle', () => {
   const hasBootstrapped = ref(false);
   const currentPhaseLabel = ref('准备启动...');
   const lastTransitionAt = ref<number | null>(null);
-  const isBackground = ref(false);
+  const lifecycleSnapshot = ref<LifecycleSnapshotDto | null>(null);
+  const isBackground = computed(() => lifecycleSnapshot.value?.phase === 'background');
+  const applyLifecycleSnapshot = (next: LifecycleSnapshotDto | null) => {
+    lifecycleSnapshot.value = selectLatestLifecycleSnapshot(lifecycleSnapshot.value, next);
+  };
 
 
 
@@ -59,6 +66,7 @@ export const useAppLifecycleStore = defineStore('appLifecycle', () => {
   const notificationStore = useNotificationStore();
   const { processPayload } = useNotificationProcessor();
   const avatarStore = useAvatarStore();
+  const platformStore = usePlatformStore();
 
   let bootstrapPromise: Promise<void> | null = null;
   let coreReadyUnlisten: (() => void) | null = null;
@@ -283,6 +291,7 @@ export const useAppLifecycleStore = defineStore('appLifecycle', () => {
     try {
       console.log('[Lifecycle] Fetching system status snapshot...');
       const snapshot = await invoke<SystemSnapshotDto>('get_system_snapshot');
+      applyLifecycleSnapshot(snapshot.lifecycle);
 
       for (const service of snapshot.backgroundServiceFailures) {
         notificationStore.addNotification(processPayload({ type: 'vcp-background-service-error', service }));
@@ -339,31 +348,37 @@ export const useAppLifecycleStore = defineStore('appLifecycle', () => {
         errorMsg.value = null;
         hasBootstrapped.value = false;
 
-        // --- 权限门禁：通知、电池优化豁免与通知监听是本产品（常驻中继节点）的保活核心能力，
+        setState('BOOTING', '读取平台能力');
+        updatePhaseLabel('正在读取平台能力...');
+        await platformStore.load(force);
+
+        // --- Android 权限门禁：通知、电池优化豁免与通知监听是常驻中继节点的保活核心能力，
         // 缺失时先进入引导页；存储等非核心权限保持按需（feature-triggered）申请 ---
-        try {
-          const pStatus = await invoke<PermissionStatusDto>('plugin:vcp-mobile|check_all_permissions');
-          const listenerRes = await invoke<ListenerPermissionDto>('plugin:vcp-mobile|check_notification_listener_permission');
-          bootMark('fe:permissions_done');
-          if (!pStatus.notification || !pStatus.battery || !listenerRes.enabled) {
-            console.log('[Lifecycle] Missing keep-alive critical permissions, entering permission gate');
-            // 仅在确认缺失权限时才将状态设为 PERMISSIONS，避免权限完整时引导页一闪而过
-            setState('PERMISSIONS', '权限缺失，展示引导界面');
-            // 清除 Promise，以便用户在引导页点击“激活并进入应用”时能重新触发
-            bootstrapPromise = null;
-            isBootstrapping.value = false;
-            return;
+        if (platformStore.isImplemented('androidPermissionGate')) {
+          try {
+            const pStatus = await invoke<PermissionStatusDto>('plugin:vcp-mobile|check_all_permissions');
+            const listenerRes = await invoke<ListenerPermissionDto>('plugin:vcp-mobile|check_notification_listener_permission');
+            bootMark('fe:permissions_done');
+            if (!pStatus.notification || !pStatus.battery || !listenerRes.enabled) {
+              console.log('[Lifecycle] Missing keep-alive critical permissions, entering permission gate');
+              // 仅在确认缺失权限时才将状态设为 PERMISSIONS，避免权限完整时引导页一闪而过
+              setState('PERMISSIONS', '权限缺失，展示引导界面');
+              // 清除 Promise，以便用户在引导页点击“激活并进入应用”时能重新触发
+              bootstrapPromise = null;
+              isBootstrapping.value = false;
+              return;
+            }
+          } catch (e) {
+            // 权限检查异常时仍允许前台使用，以常驻通知说明后台能力尚未确认。
+            console.warn('[Lifecycle] Permission check unavailable, continuing with warning:', e);
+            notificationStore.addNotification({
+              id: 'startup_permission_check_failed',
+              title: '启动权限检查未完成',
+              message: '已继续进入应用，可保持前台使用。后台流式回复和连接保活可能受影响，请检查系统中的通知权限、通知访问权限与电池后台设置。',
+              type: 'warning',
+              duration: 0,
+            });
           }
-        } catch (e) {
-          // 权限检查异常时仍允许前台使用，以常驻通知说明后台能力尚未确认。
-          console.warn('[Lifecycle] Permission check unavailable, continuing with warning:', e);
-          notificationStore.addNotification({
-            id: 'startup_permission_check_failed',
-            title: '启动权限检查未完成',
-            message: '已继续进入应用，可保持前台使用。后台流式回复和连接保活可能受影响，请检查系统中的通知权限、通知访问权限与电池后台设置。',
-            type: 'warning',
-            duration: 0,
-          });
         }
 
         setState('BOOTING', '开始前端主线程启动编排');
@@ -400,6 +415,8 @@ export const useAppLifecycleStore = defineStore('appLifecycle', () => {
     hasBootstrapped,
     lastTransitionAt,
     isBackground,
+    lifecycleSnapshot,
+    applyLifecycleSnapshot,
     coreStatus: computed(() => notificationStore.vcpCoreStatus),
     bootstrap,
     hydrateSystemStatus

@@ -4,6 +4,7 @@
 //! `vcp-update://status` 事件广播；前端不再向下载/安装命令传递 URL 或路径。
 
 use super::download::{self, DownloadAttempt};
+use crate::vcp_modules::infra::platform::{require_capability, CapabilityName};
 use reqwest::{redirect::Policy, Client, Url};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -25,10 +26,13 @@ const UPDATES_DIR_NAME: &str = "updates";
 const APK_FILENAME: &str = "update.apk";
 const APK_PART_FILENAME: &str = "update.apk.part";
 const INSTALLING_APK_PREFIX: &str = "installing-";
+#[cfg(any(target_os = "android", test))]
 const STALE_INSTALLER_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 const MAX_APK_BYTES: u64 = 512 * 1024 * 1024;
 const GITHUB_RELEASE_PATH_PREFIX: &str = "/MRiecy/VCPMobile/releases/download/";
+#[cfg(target_os = "android")]
 const LEGACY_FRONTEND_UPDATES_DIR: &str = "frontend_updates";
+#[cfg(target_os = "android")]
 const LEGACY_FRONTEND_DOWNLOADS_DIR: &str = "frontend_update_downloads";
 const MAX_DOWNLOAD_ATTEMPTS: u32 = 3;
 const PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(200);
@@ -411,6 +415,7 @@ async fn remove_file_if_exists(path: &Path) -> Result<(), String> {
 
 /// 把旧版本留在 cache 根目录的 OTA 文件迁入 `updates/` 子目录。
 /// 只处理固定文件名与 `installing-*.apk` 前缀，best-effort。
+#[cfg(target_os = "android")]
 fn migrate_update_cache_dir(cache_dir: &Path) {
     let updates_dir = cache_dir.join(UPDATES_DIR_NAME);
     let mut candidates: Vec<PathBuf> = [APK_FILENAME, APK_PART_FILENAME]
@@ -453,6 +458,7 @@ fn migrate_update_cache_dir(cache_dir: &Path) {
     }
 }
 
+#[cfg(any(target_os = "android", test))]
 fn remove_canonical_legacy_dir(base_dir: &Path, leaf_name: &str) -> Result<bool, String> {
     let candidate = base_dir.join(leaf_name);
     let metadata = match std::fs::symlink_metadata(&candidate) {
@@ -486,10 +492,12 @@ fn remove_canonical_legacy_dir(base_dir: &Path, leaf_name: &str) -> Result<bool,
     Ok(true)
 }
 
+#[cfg(target_os = "android")]
 fn cleanup_stale_installer_apks(updates_dir: &Path) -> Result<u32, String> {
     cleanup_stale_installer_apks_at(updates_dir, SystemTime::now())
 }
 
+#[cfg(any(target_os = "android", test))]
 fn cleanup_stale_installer_apks_at(updates_dir: &Path, now: SystemTime) -> Result<u32, String> {
     let entries = match std::fs::read_dir(updates_dir) {
         Ok(entries) => entries,
@@ -531,10 +539,12 @@ fn cleanup_stale_installer_apks_at(updates_dir: &Path, now: SystemTime) -> Resul
     Ok(removed)
 }
 
+#[cfg(any(target_os = "android", test))]
 use std::time::SystemTime;
 
 /// 前端资源热更新已停用。应用始终使用 APK 内嵌资源；这里在固定目录通过
 /// canonical 校验后尽力清理旧版本遗留，同时把旧位置的更新包迁入 `updates/`。
+#[cfg(target_os = "android")]
 pub fn cleanup_legacy_frontend_ota(app: &AppHandle) {
     let legacy_dirs = [
         (app.path().app_config_dir(), LEGACY_FRONTEND_UPDATES_DIR),
@@ -572,6 +582,7 @@ pub fn cleanup_legacy_frontend_ota(app: &AppHandle) {
 
 #[tauri::command]
 pub async fn get_update_status(session: State<'_, UpdateSession>) -> Result<UpdateStatus, String> {
+    require_capability(CapabilityName::ApkUpdate)?;
     Ok(session.snapshot().await)
 }
 
@@ -580,6 +591,7 @@ pub async fn check_for_update(
     app: AppHandle,
     session: State<'_, UpdateSession>,
 ) -> Result<UpdateStatus, String> {
+    require_capability(CapabilityName::ApkUpdate)?;
     transition(&app, &session, |inner| {
         inner.state = UpdateState::Checking;
         inner.error = None;
@@ -715,6 +727,7 @@ pub async fn start_update_download(
     app: AppHandle,
     session: State<'_, UpdateSession>,
 ) -> Result<UpdateStatus, String> {
+    require_capability(CapabilityName::ApkUpdate)?;
     let artifact = {
         let inner = session.inner.read().await;
         match inner.state {
@@ -936,6 +949,7 @@ pub async fn cancel_update_download(
     _app: AppHandle,
     session: State<'_, UpdateSession>,
 ) -> Result<UpdateStatus, String> {
+    require_capability(CapabilityName::ApkUpdate)?;
     let flag = session.inner.read().await.cancel.clone();
     if let Some(flag) = flag {
         flag.store(true, Ordering::Relaxed);
@@ -1000,6 +1014,7 @@ pub async fn install_update(
     app: AppHandle,
     session: State<'_, UpdateSession>,
 ) -> Result<UpdateStatus, String> {
+    require_capability(CapabilityName::ApkUpdate)?;
     {
         let inner = session.inner.read().await;
         if inner.state != UpdateState::ReadyToInstall {

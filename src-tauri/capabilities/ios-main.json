@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "ios-main",
+  "description": "iOS main-window APIs; native plugin grants are added only when their adapters are implemented",
+  "windows": ["main"],
+  "platforms": ["iOS"],
+  "permissions": [
+    "core:default",
+    "opener:default"
+  ]
+}

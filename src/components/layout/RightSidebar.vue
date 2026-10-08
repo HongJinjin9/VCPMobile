@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { watch, ref } from 'vue';
+import { watch, ref, computed } from 'vue';
 import { onClickOutside, onKeyStroke } from '@vueuse/core';
 import {
   X,
@@ -23,6 +23,7 @@ import { useSidebarSwipe } from '../../core/composables/useSidebarSwipe';
 import NotificationStatusBar from '../../features/notification/NotificationStatusBar.vue';
 import NotificationList from '../../features/notification/NotificationList.vue';
 import { useOverlayStore } from '../../core/stores/overlay';
+import { usePlatformStore } from '../../core/stores/platform';
 
 const props = defineProps<{ isOpen: boolean }>();
 
@@ -33,6 +34,7 @@ const emit = defineEmits<{
 const store = useNotificationStore();
 const { processPayload } = useNotificationProcessor();
 const overlayStore = useOverlayStore();
+const platformStore = usePlatformStore();
 
 const openDistributedView = () => {
   overlayStore.openDistributed();
@@ -109,6 +111,10 @@ const moreTools = [
     open: () => overlayStore.openSettings(),
   },
 ] as const;
+
+const availableTools = computed(() => moreTools.filter(tool =>
+  tool.id !== 'vcp-cli' || platformStore.isImplemented('cli'),
+));
 
 useSidebarSwipe(sidebarRef, { type: 'right' });
 onClickOutside(moreTrayRef, closeMoreMenu);
@@ -279,7 +285,7 @@ watch(
 
           <div class="right-tool-grid grid grid-cols-2 gap-2">
             <button
-              v-for="tool in moreTools"
+              v-for="tool in availableTools"
               :key="tool.id"
               type="button"
               class="min-w-0 min-h-11 px-3 rounded-full border border-black/10 dark:border-white/10 bg-[var(--secondary-bg)] text-[var(--primary-text)] text-[11px] font-bold flex items-center justify-center gap-2 transition-all hover:border-[var(--highlight-text)] active:opacity-80 active:scale-[0.98]"
@@ -298,6 +304,7 @@ watch(
           class="col-span-1 min-h-12 px-4 rounded-full transition-all text-white flex items-center justify-center gap-2 hover:opacity-90 active:scale-95 shadow-md border border-black/5 dark:border-white/5"
           style="background-color: var(--highlight-text)"
           @click="openMoreTool(openDistributedView)"
+          v-if="platformStore.isImplemented('distributed')"
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>

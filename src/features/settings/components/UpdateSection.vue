@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue';
 import { getVersion } from '@tauri-apps/api/app';
 import { useUpdateStore } from '../../../core/stores/update';
+import { usePlatformStore } from '../../../core/stores/platform';
 import SettingsRow from '../../../components/settings/SettingsRow.vue';
 import SettingsActionButton from '../../../components/settings/SettingsActionButton.vue';
 import SettingsInlineStatus from '../../../components/settings/SettingsInlineStatus.vue';
@@ -15,9 +16,11 @@ const justCheckedNoUpdate = ref(false);
 const autoCheckEnabled = ref(localStorage.getItem(AUTO_CHECK_KEY) !== 'off');
 
 const updateStore = useUpdateStore();
+const platformStore = usePlatformStore();
 
 onMounted(async () => {
-  updateStore.init();
+  if (!platformStore.isImplemented('apkUpdate')) return;
+  void updateStore.init().catch((error) => console.warn('[UpdateSection] Init failed:', error));
   try {
     currentVersion.value = await getVersion();
   } catch (e) {
@@ -86,7 +89,7 @@ const openPrompt = () => {
 </script>
 
 <template>
-  <div class="space-y-2">
+  <div v-if="platformStore.isImplemented('apkUpdate')" class="space-y-2">
     <SettingsRow
       title="版本更新"
       :description="rowDescription"

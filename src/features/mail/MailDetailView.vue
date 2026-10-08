@@ -17,6 +17,7 @@ import {
   Undo2,
 } from 'lucide-vue-next';
 import { useOverlayStore } from '../../core/stores/overlay';
+import { usePlatformStore } from '../../core/stores/platform';
 import { filterTrustedRichHtml } from '../../core/utils/astRenderer';
 import { useMailStore } from './mailStore';
 import MailComposeView from './MailComposeView.vue';
@@ -33,6 +34,7 @@ const emit = defineEmits<{ close: [] }>();
 
 const store = useMailStore();
 const overlayStore = useOverlayStore();
+const platformStore = usePlatformStore();
 
 const isReplyOpen = ref(false);
 
@@ -170,6 +172,7 @@ async function download(partId: string, filename: string): Promise<void> {
               </span>
             </div>
             <button
+              v-if="platformStore.isImplemented('fileExport')"
               type="button"
               class="md-attachment-btn"
               :aria-label="`下载 ${att.filename}`"

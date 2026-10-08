@@ -1,8 +1,10 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { createPinia, setActivePinia } from 'pinia';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia';
 import { useUpdateStore } from '../../../core/stores/update';
-import { emitTauriEvent, invokeMock, mockInvoke } from '../../mocks/tauri';
+import { emitTauriEvent, invokeMock, listenMock, mockInvoke } from '../../mocks/tauri';
 import { UPDATE_STATUS_EVENT, type UpdateStatus } from '../../../core/types/update';
+import { usePlatformStore } from '../../../core/stores/platform';
+import { platformFixture } from '../../fixtures/platform';
 
 const idle: UpdateStatus = {
   state: 'idle',
@@ -28,9 +30,15 @@ const available: UpdateStatus = {
 };
 
 describe('update store', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia());
+  let pinia: Pinia;
+  beforeEach(async () => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+    mockInvoke('get_platform_capabilities', () => platformFixture('android'));
+    await usePlatformStore().load();
   });
+
+  afterEach(() => disposePinia(pinia));
 
   it('init pulls the current snapshot once and then follows broadcast events', async () => {
     mockInvoke('get_update_status', () => idle);
@@ -93,5 +101,59 @@ describe('update store', () => {
     expect(result.state).toBe('failed');
     expect(store.error?.stage).toBe('download');
     expect(store.error?.retryable).toBe(true);
+  });
+
+  it('rejects every APK entry before capabilities load or on iOS without invoking updater commands', async () => {
+    const platform = usePlatformStore();
+    platform.snapshot = null;
+    invokeMock.mockClear();
+    const store = useUpdateStore();
+
+    for (const action of [store.init, store.check, store.startDownload, store.cancelDownload, store.install]) {
+      await expect(action()).rejects.toThrow('平台能力尚未加载');
+    }
+    expect(() => store.openPrompt()).toThrow('平台能力尚未加载');
+    expect(invokeMock).not.toHaveBeenCalled();
+    expect(listenMock).not.toHaveBeenCalled();
+
+    mockInvoke('get_platform_capabilities', () => platformFixture('ios'));
+    await platform.load();
+    invokeMock.mockClear();
+    for (const action of [store.init, store.check, store.startDownload, store.cancelDownload, store.install]) {
+      await expect(action()).rejects.toThrow('不支持');
+    }
+    expect(() => store.openPrompt()).toThrow('不支持');
+    expect(invokeMock).not.toHaveBeenCalled();
+    expect(listenMock).not.toHaveBeenCalled();
+  });
+
+  it('retries a failed subscription and stops consuming events when disposed', async () => {
+    mockInvoke('get_update_status', () => idle);
+    listenMock.mockRejectedValueOnce(new Error('listener unavailable'));
+    const store = useUpdateStore();
+
+    await expect(store.init()).rejects.toThrow('listener unavailable');
+    await store.init();
+    expect(listenMock).toHaveBeenCalledTimes(2);
+    emitTauriEvent(UPDATE_STATUS_EVENT, available);
+    expect(store.state).toBe('available');
+
+    store.$dispose();
+    emitTauriEvent(UPDATE_STATUS_EVENT, idle);
+    expect(store.state).toBe('available');
+  });
+
+  it('releases a failed snapshot subscription and permits a later retry', async () => {
+    mockInvoke('get_update_status', async () => { throw new Error('snapshot unavailable'); });
+    const store = useUpdateStore();
+
+    await expect(store.init()).rejects.toThrow('snapshot unavailable');
+    emitTauriEvent(UPDATE_STATUS_EVENT, available);
+    expect(store.state).toBe('idle');
+
+    mockInvoke('get_update_status', () => available);
+    await store.init();
+    expect(store.state).toBe('available');
+    expect(listenMock).toHaveBeenCalledTimes(2);
   });
 });

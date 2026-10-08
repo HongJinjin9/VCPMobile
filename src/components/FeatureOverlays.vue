@@ -16,6 +16,7 @@
 import { defineAsyncComponent, ref, watch } from 'vue';
 import { useOverlayStore } from '../core/stores/overlay';
 import { useSettingsStore } from '../core/stores/settings';
+import { usePlatformStore } from '../core/stores/platform';
 import ToolInteractionOverlay from '../features/distributed/ToolInteractionOverlay.vue';
 
 // 相对低频的设置页按需懒加载：用户首次打开时才下载 chunk，SlidePage 动画天然遮盖加载延迟
@@ -41,6 +42,7 @@ const TarvenSettingsView = defineAsyncComponent(() => import('../features/chat/c
 
 const overlayStore = useOverlayStore();
 const settingsStore = useSettingsStore();
+const platformStore = usePlatformStore();
 
 const createFirstOpenLatch = (isOpen: () => boolean) => {
   const mounted = ref(isOpen());
@@ -108,7 +110,7 @@ const globalSearchMounted = createFirstOpenLatch(() => overlayStore.isGlobalSear
     />
 
     <DistributedView
-      v-if="distributedMounted"
+      v-if="distributedMounted && platformStore.isImplemented('distributed')"
       :is-open="overlayStore.isDistributedOpen"
       :z-index="overlayStore.getPageZIndex('distributed')"
       @close="overlayStore.closeDistributed()"
@@ -122,7 +124,7 @@ const globalSearchMounted = createFirstOpenLatch(() => overlayStore.isGlobalSear
     />
 
     <VcpCliManifestView
-      v-if="cliManifestMounted"
+      v-if="cliManifestMounted && platformStore.isImplemented('cli')"
       :is-open="overlayStore.isCliManifestOpen"
       :z-index="overlayStore.getPageZIndex('cliManifest')"
       @close="overlayStore.closeCliManifest()"
@@ -190,6 +192,6 @@ const globalSearchMounted = createFirstOpenLatch(() => overlayStore.isGlobalSear
     </Suspense>
 
     <!-- 仅当用户已启用分布式计算时才挂载事件监听器，避免常驻不必要的后台监听 -->
-    <ToolInteractionOverlay v-if="settingsStore.settings?.distributedEnabled" />
+    <ToolInteractionOverlay v-if="platformStore.isImplemented('distributed') && settingsStore.settings?.distributedEnabled" />
   </div>
 </template>

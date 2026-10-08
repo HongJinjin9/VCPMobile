@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { PermissionStatusDto } from "../../core/types/native";
 import { useSettingsStore } from "../../core/stores/settings";
 import { useNotificationStore } from "../../core/stores/notification";
+import { usePlatformStore } from "../../core/stores/platform";
 import { useDistributed } from "./composables/useDistributed";
 import SlidePage from "../../components/ui/SlidePage.vue";
 
@@ -541,6 +542,7 @@ let rootCheckTimer: ReturnType<typeof setTimeout> | null = null;
 const checkRootState = async () => {
   console.log("[DistributedView] checkRootState checking system root access...");
   try {
+    usePlatformStore().require('rootAccess');
     const res = await checkRootAccess();
     console.log("[DistributedView] checkRootState result:", JSON.stringify(res));
     isRootGranted.value = res.isRoot;
@@ -553,6 +555,7 @@ const checkRootState = async () => {
 const handleLaunchRootManager = async () => {
   console.log("[DistributedView] handleLaunchRootManager triggered, attempting JNI redirect...");
   try {
+    usePlatformStore().require('rootAccess');
     const res = await launchRootManager();
     console.log("[DistributedView] launchRootManager JNI result:", JSON.stringify(res));
     if (res.success) {
@@ -606,6 +609,7 @@ const filteredPlaceholders = computed(() => {
 });
 
 const openView = () => {
+  if (!usePlatformStore().isImplemented('distributed')) return;
   const generation = ++viewGeneration;
   activate();
   void loadSettings(generation);

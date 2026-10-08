@@ -78,8 +78,9 @@ macro_rules! app_command_handler {
         use crate::vcp_modules::high_speed_channel::prepare_vcp_upload;
         use crate::vcp_modules::lifecycle_manager::{
             get_core_status, get_last_error, get_system_snapshot, reconcile_distributed_node_cmd,
-            restart_or_exit_app, set_app_foreground_state,
+            restart_or_exit_app,
         };
+        use crate::vcp_modules::infra::platform::get_platform_capabilities;
         use crate::vcp_modules::logcenter::{logcenter_clear_server, logcenter_fetch};
         use crate::vcp_modules::mail::{
             mail_attachment, mail_folders, mail_list, mail_mark, mail_move, mail_read, mail_reply,
@@ -331,10 +332,10 @@ macro_rules! app_command_handler {
                 get_boot_trace,
                 get_core_status,
                 get_last_error,
+                get_platform_capabilities,
                 get_system_snapshot,
                 restart_or_exit_app,
                 save_boot_trace,
-                set_app_foreground_state,
                 // ── 同步（sync_service）──
                 clear_old_sync_logs,
                 list_sync_log_files,
@@ -367,6 +368,13 @@ macro_rules! app_command_handler {
 
         // 壳闭包本体：极薄，任何命令的胖瘦都不再经过 JavaBridge 的栈。
         move |invoke| {
+            // App commands do not inherit plugin ACLs without an app ACL manifest.
+            // The production app has one trusted main WebView; archived portal labels
+            // must not acquire all custom commands through the default dispatcher.
+            if invoke.message.webview().label() != "main" {
+                invoke.resolver.reject("unsupported: app commands require the main WebView");
+                return true;
+            }
             let commands = std::sync::Arc::clone(&app_commands);
             tauri::async_runtime::spawn(async move {
                 let cmd = invoke.message.command().to_string();

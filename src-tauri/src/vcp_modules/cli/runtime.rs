@@ -2110,6 +2110,9 @@ pub async fn get_vcp_mobile_cli_status(
     app: AppHandle,
     state: State<'_, MobileCliRuntimeState>,
 ) -> Result<MobileCliStatus, String> {
+    crate::vcp_modules::infra::platform::require_capability(
+        crate::vcp_modules::infra::platform::CapabilityName::Cli,
+    )?;
     state.status(&app).await
 }
 
@@ -2119,6 +2122,9 @@ pub async fn execute_vcp_mobile_cli_action(
     state: State<'_, MobileCliRuntimeState>,
     request: ExecuteVcpMobileCliRequest,
 ) -> Result<ExecuteVcpMobileCliResponse, String> {
+    crate::vcp_modules::infra::platform::require_capability(
+        crate::vcp_modules::infra::platform::CapabilityName::Cli,
+    )?;
     state.execute(&app, request).await
 }
 
@@ -2127,6 +2133,9 @@ pub async fn get_vcp_mobile_cli_skill_catalog(
     app: AppHandle,
     state: State<'_, MobileCliRuntimeState>,
 ) -> Result<SkillCatalogSnapshot, String> {
+    crate::vcp_modules::infra::platform::require_capability(
+        crate::vcp_modules::infra::platform::CapabilityName::Cli,
+    )?;
     state.skill_catalog_snapshot(&app).await
 }
 
@@ -2136,6 +2145,9 @@ pub async fn inspect_vcp_mobile_cli_skill_import(
     state: State<'_, MobileCliRuntimeState>,
     request: InspectSkillImportRequest,
 ) -> Result<SkillImportCandidate, String> {
+    crate::vcp_modules::infra::platform::require_capability(
+        crate::vcp_modules::infra::platform::CapabilityName::Cli,
+    )?;
     state.inspect_skill_import(&app, request).await
 }
 
@@ -2145,6 +2157,9 @@ pub async fn commit_vcp_mobile_cli_skill_import(
     state: State<'_, MobileCliRuntimeState>,
     request: CommitSkillImportRequest,
 ) -> Result<CommitSkillImportResponse, String> {
+    crate::vcp_modules::infra::platform::require_capability(
+        crate::vcp_modules::infra::platform::CapabilityName::Cli,
+    )?;
     state.commit_skill_import(&app, request).await
 }
 
@@ -2154,6 +2169,9 @@ pub async fn discard_vcp_mobile_cli_skill_import(
     state: State<'_, MobileCliRuntimeState>,
     request: DiscardSkillImportRequest,
 ) -> Result<(), String> {
+    crate::vcp_modules::infra::platform::require_capability(
+        crate::vcp_modules::infra::platform::CapabilityName::Cli,
+    )?;
     state.discard_skill_import(&app, request).await
 }
 

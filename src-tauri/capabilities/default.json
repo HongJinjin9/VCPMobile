@@ -1,29 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
-  "windows": ["main", "vcp-portal-*"],
+  "description": "Shared main-window APIs for Android and the development host; no portal window is authorized",
+  "windows": ["main"],
+  "platforms": ["android", "windows", "macOS", "linux"],
   "permissions": [
     "core:default",
-    "opener:default",
-    "vcp-mobile:allow-all",
-    "core:window:allow-close",
-    "core:window:allow-hide",
-    "core:webview:allow-create-webview-window",
-    "core:window:allow-create"
-  ],
-  "protocols": {
-    "vcp-avatar": {
-      "name": "vcp-avatar",
-      "scopes": ["**"]
-    },
-    "vcp": {
-      "name": "vcp",
-      "scopes": ["**"]
-    },
-    "vcp-portal": {
-      "name": "vcp-portal",
-      "scopes": ["**"]
-    }
-  }
+    "opener:default"
+  ]
 }

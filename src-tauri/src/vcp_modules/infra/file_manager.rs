@@ -32,7 +32,7 @@ pub(crate) fn safe_storage_extension(original_name: &str) -> Option<&str> {
     }
 }
 
-fn canonical_file_within_root(
+fn canonical_staged_file(
     root: &std::path::Path,
     file: &std::path::Path,
     label: &str,
@@ -41,7 +41,7 @@ fn canonical_file_within_root(
         .map_err(|error| format!("{} staging 根目录不可用: {}", label, error))?;
     let canonical_file = std::fs::canonicalize(file)
         .map_err(|error| format!("{} staging 文件不可用: {}", label, error))?;
-    if !canonical_file.starts_with(&canonical_root) || !canonical_file.is_file() {
+    if canonical_file.parent() != Some(canonical_root.as_path()) || !canonical_file.is_file() {
         return Err(format!("非法的 {} staging 文件路径", label));
     }
     Ok(canonical_file)
@@ -95,18 +95,75 @@ pub(crate) async fn check_existing_cas_size_async(
 /// =================================================================
 /// vcp_modules/file_manager.rs - 附件物理存储与分片上传管理
 /// =================================================================
-/// 核心路径解析：获取基础数据存储根目录
-/// Android: /storage/emulated/0/Android/data/<pkg>/files
+/// SQLite 与应用支持文件的私有根目录；不包含 Android 的外部附件目录。
+/// Android 保留 Tauri app_config_dir（activity.dataDir），iOS 使用 Application Support。
+pub fn get_support_root_dir<R: tauri::Runtime>(
+    app_handle: &tauri::AppHandle<R>,
+) -> Result<PathBuf, String> {
+    #[cfg(target_os = "android")]
+    {
+        app_handle
+            .path()
+            .app_config_dir()
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(target_os = "ios")]
+    {
+        app_handle.path().app_data_dir().map_err(|e| e.to_string())
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        // 仅 host 开发/测试，保留现有配置目录，不建立桌面产品数据布局。
+        app_handle
+            .path()
+            .app_config_dir()
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// 核心路径解析：获取附件持久数据根目录。
+/// Android 保留 external files；iOS 落在 Application Support，不能上溯 Documents。
 pub fn get_data_root_dir<R: tauri::Runtime>(
     app_handle: &tauri::AppHandle<R>,
 ) -> Result<std::path::PathBuf, String> {
-    // document_dir 在 Android 上通常指向 .../files/documents
-    let mut path = app_handle
-        .path()
-        .document_dir()
-        .map_err(|e| format!("Failed to get document_dir: {}", e))?;
-    path.pop(); // 弹出 documents，留下 .../files
-    Ok(path)
+    #[cfg(target_os = "android")]
+    {
+        let mut path = app_handle
+            .path()
+            .document_dir()
+            .map_err(|e| format!("Failed to get document_dir: {}", e))?;
+        path.pop(); // 保留现有 .../files/Documents 的父目录，避免迁移 Android 数据。
+        Ok(path)
+    }
+    #[cfg(target_os = "ios")]
+    {
+        get_support_root_dir(app_handle)
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        // 仅保留原 host 开发数据位置；不能作为移动端目录实现复用。
+        let mut path = app_handle
+            .path()
+            .document_dir()
+            .map_err(|e| format!("Failed to get document_dir: {}", e))?;
+        path.pop();
+        Ok(path)
+    }
+}
+
+/// 可丢弃缓存的根目录。iOS 由 Tauri 解析为 Library/Caches/<实际 identifier>。
+pub fn get_cache_root_dir<R: tauri::Runtime>(
+    app_handle: &tauri::AppHandle<R>,
+) -> Result<PathBuf, String> {
+    app_handle.path().app_cache_dir().map_err(|e| e.to_string())
+}
+
+/// 附件导入暂存区。原生复制、HTTP 上传、登记和冷启动清理共用此路径。
+/// 只存未提交的临时文件；CAS 成功登记后由导入 owner 释放，不能当作长期附件路径。
+pub fn get_upload_staging_dir<R: tauri::Runtime>(
+    app_handle: &tauri::AppHandle<R>,
+) -> Result<PathBuf, String> {
+    Ok(get_cache_root_dir(app_handle)?.join("uploads"))
 }
 
 /// 核心路径解析：获取附件存储根目录
@@ -129,11 +186,13 @@ pub fn get_thumbnails_root_dir<R: tauri::Runtime>(
     Ok(path)
 }
 
-/// 核心路径解析：获取多模态抽取/转码持久化缓存目录
-/// Android: /storage/emulated/0/Android/data/<pkg>/files/multimodal_cache
+/// 可重算的多模态抽取/转码缓存。Android/host 保留原位置；iOS 不写入持久支持目录。
 pub fn get_multimodal_cache_dir<R: tauri::Runtime>(
     app_handle: &tauri::AppHandle<R>,
 ) -> Result<std::path::PathBuf, String> {
+    #[cfg(target_os = "ios")]
+    let mut path = get_cache_root_dir(app_handle)?;
+    #[cfg(not(target_os = "ios"))]
     let mut path = get_data_root_dir(app_handle)?;
     path.push("multimodal_cache");
     Ok(path)
@@ -417,6 +476,7 @@ pub async fn generate_thumbnail<R: tauri::Runtime>(
 }
 
 /// 内部辅助函数：校验路径安全性，防止路径遍历攻击
+#[cfg(not(target_os = "ios"))]
 fn ensure_safe_path(app_handle: &AppHandle, path: &std::path::Path) -> Result<(), String> {
     // 物理展开目标路径的所有相对路径分量 (..)，杜绝字符级前缀欺骗的沙盒逃逸
     let canonical_path = if path.exists() {
@@ -427,16 +487,10 @@ fn ensure_safe_path(app_handle: &AppHandle, path: &std::path::Path) -> Result<()
         return Err("非法路径访问：目标文件不存在".to_string());
     };
 
-    let config_dir = app_handle
-        .path()
-        .app_config_dir()
-        .map_err(|e| e.to_string())?;
+    let config_dir = get_support_root_dir(app_handle)?;
     let canonical_config = std::fs::canonicalize(&config_dir).unwrap_or(config_dir);
 
-    let cache_dir = app_handle
-        .path()
-        .app_cache_dir()
-        .map_err(|e| e.to_string())?;
+    let cache_dir = get_cache_root_dir(app_handle)?;
     let canonical_cache = std::fs::canonicalize(&cache_dir).unwrap_or(cache_dir);
 
     // 允许访问 App 配置目录 (内部)、缓存目录 (临时)、附件目录 (可能在外部) 或 缩略图目录
@@ -816,21 +870,12 @@ pub async fn register_local_file(
     expected_hash: Option<String>,
 ) -> Result<AttachmentData, String> {
     // 命令仍由中央 IPC 总闸 offload；哈希缓冲必须保持堆分配，避免再次内联进 future。
-    let uploads_root = app_handle
-        .path()
-        .app_cache_dir()
-        .map_err(|e| e.to_string())?
-        .join("uploads");
+    let uploads_root = get_upload_staging_dir(&app_handle)?;
     tokio::fs::create_dir_all(&uploads_root)
         .await
         .map_err(|e| format!("无法创建上传 staging 目录: {}", e))?;
     let source_path =
-        canonical_file_within_root(&uploads_root, std::path::Path::new(&local_path), "附件")?;
-    let canonical_uploads_root = std::fs::canonicalize(&uploads_root)
-        .map_err(|e| format!("上传 staging 根目录规范化失败: {}", e))?;
-    if source_path.parent() != Some(canonical_uploads_root.as_path()) {
-        return Err("附件必须是 uploads staging 根目录的直接文件".to_string());
-    }
+        canonical_staged_file(&uploads_root, std::path::Path::new(&local_path), "附件")?;
 
     let staged_thumbnail = match thumbnail_path.as_deref() {
         Some(path) => {
@@ -839,12 +884,7 @@ pub async fn register_local_file(
                 .await
                 .map_err(|e| format!("无法创建缩略图 staging 目录: {}", e))?;
             let staged =
-                canonical_file_within_root(&thumbnail_root, std::path::Path::new(path), "缩略图")?;
-            let canonical_thumbnail_root = std::fs::canonicalize(&thumbnail_root)
-                .map_err(|e| format!("缩略图 staging 根目录规范化失败: {}", e))?;
-            if staged.parent() != Some(canonical_thumbnail_root.as_path()) {
-                return Err("缩略图必须是专用 staging 根目录的直接文件".to_string());
-            }
+                canonical_staged_file(&thumbnail_root, std::path::Path::new(path), "缩略图")?;
             Some(staged)
         }
         None => None,
@@ -1121,6 +1161,7 @@ pub async fn get_attachment_real_path(
 }
 
 /// 唤起系统默认应用打开文件或 URL
+#[cfg(not(target_os = "ios"))]
 #[tauri::command]
 pub async fn open_file(app_handle: AppHandle, path: String) -> Result<(), String> {
     let clean_path = path.replace("file://", "");
@@ -1145,7 +1186,7 @@ pub async fn open_file(app_handle: AppHandle, path: String) -> Result<(), String
     }
 
     // 使用 tauri-plugin-opener 的原生能力
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         use tauri_plugin_opener::OpenerExt;
         app_handle
@@ -1155,11 +1196,20 @@ pub async fn open_file(app_handle: AppHandle, path: String) -> Result<(), String
     }
 }
 
+#[cfg(target_os = "ios")]
+#[tauri::command]
+pub async fn open_file(app_handle: AppHandle, path: String) -> Result<(), String> {
+    let _ = (app_handle, path);
+    Err("not_implemented: 当前 iOS 版本尚不支持原生文件预览".to_string())
+}
+
 /// 清理上传缓存目录以及多媒体缓存碎片 (通常在启动时执行，清除上次闪退/强杀留下的僵尸文件)
 pub fn clear_upload_cache(app_handle: &AppHandle) {
-    if let Ok(cache_dir) = app_handle.path().app_cache_dir() {
+    if let (Ok(cache_dir), Ok(uploads_path)) = (
+        get_cache_root_dir(app_handle),
+        get_upload_staging_dir(app_handle),
+    ) {
         // 1. 清除上次上传未完成的分片临时目录
-        let uploads_path = cache_dir.join("uploads");
         if uploads_path.exists() {
             let _ = fs::remove_dir_all(&uploads_path);
             let _ = fs::create_dir_all(&uploads_path);
@@ -1473,10 +1523,12 @@ pub fn check_attachment_support(original_name: String) -> Result<bool, String> {
 
 #[cfg(test)]
 mod security_boundary_tests {
+    #[cfg(unix)]
+    use super::validated_direct_file;
     use super::{
-        canonical_file_within_root, commit_registered_attachment, normalize_attachment_mime,
+        canonical_staged_file, commit_registered_attachment, normalize_attachment_mime,
         safe_storage_extension, validate_attachment_cas_path, validated_attachment_file,
-        validated_direct_file, verify_expected_hash, verify_streamed_size,
+        verify_expected_hash, verify_streamed_size,
     };
     use super::{check_existing_cas_size, check_existing_cas_size_async};
     use crate::vcp_modules::db_manager::DbState;
@@ -1492,7 +1544,7 @@ mod security_boundary_tests {
     }
 
     #[test]
-    fn canonical_staging_gate_rejects_parent_and_symlink_escape() {
+    fn canonical_staging_gate_accepts_only_direct_files_inside_its_owner_root() {
         let temp = tempfile::tempdir().expect("tempdir");
         let root = temp.path().join("uploads");
         let outside = temp.path().join("outside");
@@ -1503,15 +1555,20 @@ mod security_boundary_tests {
         fs::write(&staged, b"ok").expect("staged");
         fs::write(&escaped, b"secret").expect("escaped");
 
-        assert!(canonical_file_within_root(&root, &staged, "test").is_ok());
-        assert!(
-            canonical_file_within_root(&root, &root.join("../outside/secret.bin"), "test").is_err()
-        );
+        assert!(canonical_staged_file(&root, &staged, "test").is_ok());
+        assert!(canonical_staged_file(&root, &root.join("../outside/secret.bin"), "test").is_err());
+        assert!(canonical_staged_file(&root, &root, "test").is_err());
+        let thumbnail_root = root.join("thumbnails");
+        fs::create_dir(&thumbnail_root).expect("thumbnail staging root");
+        let thumbnail = thumbnail_root.join("image.webp");
+        fs::write(&thumbnail, b"thumbnail").expect("staged thumbnail");
+        assert!(canonical_staged_file(&root, &thumbnail, "test").is_err());
+        assert!(canonical_staged_file(&thumbnail_root, &thumbnail, "test").is_ok());
 
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink(&escaped, root.join("link.bin")).expect("symlink");
-            assert!(canonical_file_within_root(&root, &root.join("link.bin"), "test").is_err());
+            assert!(canonical_staged_file(&root, &root.join("link.bin"), "test").is_err());
         }
     }
 

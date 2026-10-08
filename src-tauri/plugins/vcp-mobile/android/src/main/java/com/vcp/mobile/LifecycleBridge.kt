@@ -21,7 +21,10 @@ import java.util.concurrent.atomic.AtomicLong
 class LifecycleBridge : DefaultLifecycleObserver {
 
     private var pluginRef: WeakReference<VcpMobilePlugin>? = null
-    private val transitionEpoch = AtomicLong(0)
+    // Process-wide sequence survives a plugin instance/Activity replacement.
+    private companion object {
+        val nativeSequence = AtomicLong(0)
+    }
     private var lastForegroundState: Boolean? = null
 
     fun attach(activity: Activity, plugin: VcpMobilePlugin) {
@@ -51,8 +54,9 @@ class LifecycleBridge : DefaultLifecycleObserver {
         val foreground = lastForegroundState
             ?: ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
         return JSObject().apply {
-            put("state", if (foreground) "resume" else "pause")
-            put("epoch", transitionEpoch.get())
+            put("phase", if (foreground) "active" else "background")
+            put("nativeSequence", nativeSequence.get())
+            put("snapshot", true)
         }
     }
 
@@ -62,37 +66,41 @@ class LifecycleBridge : DefaultLifecycleObserver {
     }
 
     override fun onResume(owner: LifecycleOwner) {
-        emitTransition("resume", true)
+        emitTransition(true)
     }
 
     override fun onPause(owner: LifecycleOwner) {
-        emitTransition("pause", false)
+        emitTransition(false)
     }
 
     override fun onStop(owner: LifecycleOwner) {
-        emitTransition("stop", false)
+        emitTransition(false)
     }
 
     fun onConfigurationChanged(newConfig: Configuration) {
         val uiMode = newConfig.uiMode and Configuration.UI_MODE_NIGHT_MASK
         val isDark = uiMode == Configuration.UI_MODE_NIGHT_YES
-        emit(mapOf(
-            "state" to "config-changed",
+        emit("configuration", mapOf(
             "isDarkMode" to isDark
         ))
     }
 
     fun onLowMemory() {
-        emit(mapOf("state" to "low-memory"))
+        emit("memory-pressure", emptyMap())
     }
 
-    private fun emitTransition(state: String, foreground: Boolean) {
+    private fun emitTransition(foreground: Boolean) {
         if (lastForegroundState == foreground) return
         lastForegroundState = foreground
-        emit(mapOf("state" to state, "epoch" to transitionEpoch.incrementAndGet()))
+        // Preserve Android's process pause/stop coalescing. Only iOS supplies inactive.
+        emit("lifecycle", mapOf(
+            "phase" to if (foreground) "active" else "background",
+            "nativeSequence" to nativeSequence.incrementAndGet(),
+            "snapshot" to false
+        ))
     }
 
-    private fun emit(detail: Map<String, Any?>) {
+    private fun emit(event: String, detail: Map<String, Any?>) {
         // 向 Rust 侧派发强类型的原生生命周期事件，规避 WebView 被冻结时 JS 无法执行的痛点
         val plugin = pluginRef?.get()
         if (plugin != null) {
@@ -106,7 +114,7 @@ class LifecycleBridge : DefaultLifecycleObserver {
                     is Long -> triggerData.put(key, value)
                 }
             }
-            plugin.emitNativeEvent("lifecycle", triggerData)
+            plugin.emitNativeEvent(event, triggerData)
         }
     }
 }
