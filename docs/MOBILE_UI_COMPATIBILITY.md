@@ -2,9 +2,11 @@
 
 > 文档类型：产品支持与工程规范
 > Android 历史状态：`IMPLEMENTED / SOFTWARE-VERIFIED / DEVICE-EVIDENCE-PENDING`（原专项记录，不是本轮复验）
-> iOS 状态：`PHASE-0 / SOURCE-AUDIT`，尚无本项目 Apple 构建结果
+> iOS 状态：`PHASE-2 / SOURCE-AUDIT`，尚无本项目 Apple 构建结果
 > Android 恢复基线：`cecdbe4`；iOS 启动基线：`4c6e25bb` 加任务开始时工作树，见 Phase 0 输入账本
-> 修订日期：2026-10-08；本文件接续原 Android UI 规范，保留 Android 契约并纳入 iOS 分期目标
+> 修订日期：2026-10-09；本文件接续原 Android UI 规范，保留 Android 契约并纳入 iOS 分期目标
+
+平台编译隔离、能力与权限、差异化入口及错误提示见 [跨平台开发规范](./CROSS_PLATFORM_DEVELOPMENT.md)。本文件负责窗口、布局、CSS、Insets 和触控契约。
 
 ## 1. 产品支持边界
 
@@ -16,7 +18,7 @@ VCP Mobile 当前 Android 生产运行、构建与发布覆盖以下目标：
 
 iPhone/iPad 原生客户端已进入分期实施，目标为同一 Vue/Rust 核心加 Swift adapter、单 Scene、当前窗口宽度响应，以及供用户自行签名的实验性 device 产物。首版包括 Chat/Diary/Settings/SQLite/手动 Sync、原生 Files/PHPicker/staging/大图处理和 iOS 26+ 尽力后台；其他情况使用前台常亮。minimum 采用 iOS/iPadOS 15.0 工程基线，Phase 2 显式接入配置并在 G1 编译核验，新 API 按 availability 分层。
 
-相机、录音/语音、保存相册、incoming/outgoing share、系统通知/APNs、视频抽帧与完整设备工具沿用延期范围。产品决定见 [D1–D19](../plan/vcpmobile-ios-compatibility-research/09-Magi综合裁决与待决策清单.md)，实施与证据见 [Phase 0](../plan/vcpmobile-ios-compatibility-research/phase-0/README.md)。以上为目标契约，不表示当前已具备 iOS 平台实现。
+功能范围以 [D1–D19](../plan/vcpmobile-ios-compatibility-research/09-Magi综合裁决与待决策清单.md) 及用户最新的 [Phase 2 功能审批](../plan/vcpmobile-ios-compatibility-research/phase-2/09-功能权限与提示审议表.md) 为准。2026-10-09 审批已将 incoming/outgoing share、系统通知、相机、保存相册、网络遥测及 Distributed 纳入适配方向；具体技术范围和实施阶段分别安排，系统通知不自动等同完整 APNs 服务。语音保留入口并解释尚未开发；APK 更新和 Root 同样保留说明入口，不执行不适用的原生动作。视频抽帧等未更改项沿用既定范围。SSE 后台持续接收为本轮明确的重点要求，候选方案另行研究，尚不能以尽力后台表述为已经满足。以上为目标契约，不表示当前已具备对应实现；实施与证据见 [Phase 2](../plan/vcpmobile-ios-compatibility-research/phase-2/README.md)。
 
 下列平台明确不受支持：
 

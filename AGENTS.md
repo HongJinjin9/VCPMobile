@@ -25,6 +25,8 @@
 
 **iOS 实施边界**：沿用 `plan/vcpmobile-ios-compatibility-research/09-Magi综合裁决与待决策清单.md` 的 D1–D19；各阶段在对应 `phase-0/` 至 `phase-6/` 子目录维护子规划、审计与结果。Windows 日常源码审计，Apple 构建仅通过阶段性手动 GitHub Actions（G1 接入、G2 集成/打包）；现在及后续均不建设项目 iOS 实机测试体系，正式签名与付费 Team 不在范围内。Android 正式链路继续保留；源码审计、host 检查和 Apple 构建结果分别记录，不宣称互相替代。
 
+后续功能范围与入口表达以用户最新逐项决定为准；2026-10-09 审批见 [Phase 2 功能权限与提示审议表](plan/vcpmobile-ios-compatibility-research/phase-2/09-功能权限与提示审议表.md)，其中新增意见优先于旧延期和隐藏建议。跨平台实现遵循 [跨平台开发规范](docs/CROSS_PLATFORM_DEVELOPMENT.md)。
+
 - 版本：`1.1.4`
 - 包名：`com.vcp.avatar`
 
@@ -122,6 +124,7 @@ VCPMobile/
 - `docs/plugins/`：回答"代码是**怎么**做的"（接口签名、数据流、实现细节）
 - `UI_LAYER_ARCHITECTURE.md`：全局 UI 层级规范，与 `src/core/constants/layers.ts` + `uno.config.ts` + `src/assets/themes.css` 三重机制对应
 - `MOBILE_UI_COMPATIBILITY.md`：Android 生产边界与 iOS 实验目标、共享窗口布局、分平台 CSS/Insets 与验证边界的权威规范
+- `CROSS_PLATFORM_DEVELOPMENT.md`：Android/iOS 编译隔离、能力事实、入口呈现、权限、命令与提示的开发规范
 
 ### 2.2 移动端原生插件（`tauri-plugin-vcp-mobile`）
 
@@ -167,6 +170,7 @@ pnpm android:debug:dev
 **以最佳认知熵把握改动尺度。** 在完整解决问题的同时，让系统的结构、职责与因果关系更清楚，为后续理解和演化减少负担。修复与重构的边界由这一目标决定：该深入时深入，该收束时收束。谨慎体现在对根因与影响的充分理解中，优秀体现在改动后的整体质量上。
 
 - **修改后的强制检查**: 任何涉及跨层或核心逻辑的变更后，必须运行 `pnpm check`。若未通过，必须先修复静态错误再继续。
+- **跨平台功能**: 涉及平台分支、能力、权限或差异化 UI/错误提示时，先读 [跨平台开发规范](docs/CROSS_PLATFORM_DEVELOPMENT.md)，沿真实调用链确定编译边界、状态 owner 与各平台结果。
 - **现有文件修改原则**: 对于任何已存在的文件，哪怕只改 1 行，**严禁使用全文件覆盖**，必须使用原子级、外科手术式的编辑，以防幻觉灾难。编辑方式保持精确，设计尺度由问题本身决定。
 - **Shell 安全（Windows）**:
   - 禁止使用 Unix 风格链式操作符（`&&`, `||`）。使用 `;` 分隔无关命令。
