@@ -2,13 +2,12 @@ import { onMounted, onUnmounted, ref, watch } from 'vue';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { useAppLifecycleStore } from '../stores/appLifecycle';
 import { useChatStreamStore } from '../stores/chatStreamStore';
-import { usePlatformStore } from '../stores/platform';
+import { isIOS } from '../utils/platform';
 import type { LifecycleSnapshotDto } from '../types/lifecycle';
 
 export function useAppLifecycle() {
   const lifecycleStore = useAppLifecycleStore();
   const streamStore = useChatStreamStore();
-  const platformStore = usePlatformStore();
   let unlisten: UnlistenFn | null = null;
   let unlistenNetwork: UnlistenFn | null = null;
   let recoveryPromise: Promise<void> | null = null;
@@ -19,7 +18,7 @@ export function useAppLifecycle() {
     if (disposed || lifecycleStore.state !== 'READY' || documentHidden.value) return;
     const phase = lifecycleStore.lifecycleSnapshot?.phase;
     // iOS must receive its first native snapshot before starting foreground recovery.
-    if (platformStore.platform === 'ios' && !phase) return;
+    if (isIOS && !phase) return;
     if (phase && phase !== 'active') return;
     if (recoveryPromise) return recoveryPromise;
     console.log(`[useAppLifecycle] ${source}. Triggering stream recovery.`);

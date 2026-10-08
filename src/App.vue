@@ -8,7 +8,7 @@ import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useSidebarSwipe } from "./core/composables/useSidebarSwipe";
 import { useThemeStore } from "./core/stores/theme";
 import { useAppLifecycleStore } from "./core/stores/appLifecycle";
-import { usePlatformStore } from "./core/stores/platform";
+import { isAndroid } from "./core/utils/platform";
 import { useLayoutStore } from "./core/stores/layout";
 import { useOverlayStore } from "./core/stores/overlay";
 import { useModalHistory } from "./core/composables/useModalHistory";
@@ -62,7 +62,6 @@ interface SharedContentData {
 
 const themeStore = useThemeStore();
 const lifecycleStore = useAppLifecycleStore();
-const platformStore = usePlatformStore();
 const notificationStore = useNotificationStore();
 const layoutStore = useLayoutStore();
 const overlayStore = useOverlayStore();
@@ -108,7 +107,6 @@ const isSharedFileEntry = (value: unknown): value is SharedFileEntry => {
 };
 
 const processSharedIntent = async (detail: unknown) => {
-  if (platformStore.snapshot && !platformStore.isImplemented('incomingShare')) return;
   const operationId = shareIntentOwner.begin();
   const source = detail && typeof detail === "object" && !Array.isArray(detail)
     ? detail as Record<string, unknown>
@@ -151,7 +149,6 @@ const processSharedIntent = async (detail: unknown) => {
 };
 
 const prepareShareFiles = async (content: SharedContentData, operationId: string) => {
-  if (!platformStore.isImplemented('incomingShare')) return;
   const files = content.files;
   if (files.length > 0) {
     try {
@@ -319,7 +316,6 @@ let notificationNavigationGeneration = 0;
 let stopNotificationReadyWatch: WatchStopHandle | null = null;
 
 const routeNotificationClick = (rawDetail: unknown) => {
-  if (platformStore.snapshot && !platformStore.isImplemented('systemNotifications')) return;
   const detail = parseNotificationClickTarget(rawDetail);
   if (!detail) return;
   const generation = ++notificationNavigationGeneration;
@@ -354,7 +350,6 @@ const processNotificationClick = async (
     return;
   }
 
-  if (!platformStore.isImplemented('systemNotifications')) return;
 
   const closeNavigationSurfaces = () => {
     const { closeTopModal, modalStackLength } = useModalHistory();
@@ -527,7 +522,7 @@ const handleExitRequest = async () => {
   }
 
   // 3. 只有具备原生后台切换动作的平台才在根部提供双击退出。
-  if (!platformStore.isImplemented('moveTaskToBack')) return;
+  if (!isAndroid) return;
 
   if (isWaitingExit.value) {
     if (exitTimer) {
@@ -563,9 +558,9 @@ const handleExitRequest = async () => {
 let pendingNotificationRead = false;
 let appUnmounted = false;
 watch(
-  () => [lifecycleStore.state, platformStore.isImplemented('systemNotifications')] as const,
-  async ([state, available]) => {
-    if (state !== 'READY' || !available || pendingNotificationRead) return;
+  () => lifecycleStore.state,
+  async (state) => {
+    if (!isAndroid || state !== 'READY' || pendingNotificationRead) return;
     pendingNotificationRead = true;
     try {
       const pending = await invoke<unknown>('plugin:vcp-mobile|get_pending_notification');
@@ -580,8 +575,10 @@ onMounted(async () => {
   // 1. 同步挂载基础物理按键与系统事件监听 (混合应用黄金铁律：物理拦截最优先挂载，杜绝初始化阻塞失效)
   window.addEventListener("vcp-exit-requested", handleExitRequest);
   window.addEventListener("vcp-hardware-back", handleExitRequest);
-  window.addEventListener("vcp-share-intent", handleShareIntent);
-  window.addEventListener("vcp-notification-click", handleNotificationClick);
+  if (isAndroid) {
+    window.addEventListener("vcp-share-intent", handleShareIntent);
+    window.addEventListener("vcp-notification-click", handleNotificationClick);
+  }
   leftSidebarPersistent.addEventListener("change", reconcileDrawerPresentation);
   rightSidebarPersistent.addEventListener("change", reconcileDrawerPresentation);
   reconcileDrawerPresentation();
@@ -636,7 +633,7 @@ onUnmounted(() => {
 <template>
   <div ref="appRootRef" class="vcp-app-root h-full w-full overflow-hidden flex flex-col select-none relative">
     <!-- 0. 权限门禁（仅在 PERMISSIONS 状态显示；保活核心权限缺失时阻断进入） -->
-    <PermissionGate v-if="lifecycleStore.state === 'PERMISSIONS' && platformStore.isImplemented('androidPermissionGate')" />
+    <PermissionGate v-if="lifecycleStore.state === 'PERMISSIONS'" />
 
     <!-- 0.5. 全局初始化加载层 & 错误看板；存储等非核心权限仍由对应功能按需申请 -->
     <BootScreen v-else />
@@ -694,7 +691,7 @@ onUnmounted(() => {
     <GuideOverlay v-if="lifecycleStore.state === 'READY'" />
 
     <!-- 7. 分享意图 Agent 选择器 -->
-    <ShareAgentSelector v-if="lifecycleStore.state === 'READY' && platformStore.isImplemented('incomingShare')"
+    <ShareAgentSelector v-if="lifecycleStore.state === 'READY'"
       :is-open="showShareSelector"
       :shared-text="sharedContent.text"
       :shared-file-count="sharedContent.files.length"
@@ -704,7 +701,7 @@ onUnmounted(() => {
 
     <!-- 8. 自动更新提示弹窗 -->
     <UpdatePrompt
-      v-if="platformStore.isImplemented('apkUpdate')"
+      v-if="isAndroid"
       v-model:is-open="isPromptOpen"
       :version="updateInfo?.latestVersion || ''"
       :release-notes="updateInfo?.releaseNotes"

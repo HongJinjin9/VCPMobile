@@ -2,7 +2,7 @@ import { watch, computed, onScopeDispose, ref } from 'vue';
 import { useAppLifecycleStore } from '../stores/appLifecycle';
 import { useUpdateDownloader } from './useUpdateDownloader';
 import { useUpdateStore } from '../stores/update';
-import { usePlatformStore } from '../stores/platform';
+import { isAndroid } from '../utils/platform';
 
 const LAST_CHECK_KEY = 'vcp_last_update_check';
 const SKIPPED_VERSION_KEY = 'vcp_update_skipped_version';
@@ -12,7 +12,6 @@ const COOLDOWN_MS = 24 * 60 * 60 * 1000;
 export function useAutoUpdate() {
   const lifecycleStore = useAppLifecycleStore();
   const updateStore = useUpdateStore();
-  const platformStore = usePlatformStore();
   const { downloadAndInstall } = useUpdateDownloader();
 
   let checkTimer: ReturnType<typeof setTimeout> | null = null;
@@ -38,7 +37,7 @@ export function useAutoUpdate() {
   };
 
   const performCheck = async () => {
-    if (!platformStore.isImplemented('apkUpdate') || lifecycleStore.state !== 'READY') return;
+    if (!isAndroid || lifecycleStore.state !== 'READY') return;
     if (hasCheckedThisSession.value) return;
     hasCheckedThisSession.value = true;
 
@@ -63,31 +62,32 @@ export function useAutoUpdate() {
     }
   };
 
-  watch(
-    () => [platformStore.isImplemented('apkUpdate'), lifecycleStore.state] as const,
-    ([available, newState]) => {
-      if (checkTimer) clearTimeout(checkTimer);
-      checkTimer = null;
-      if (!available) return;
-      // 能力读取完成后才订阅 Android OTA 状态；失败保留手动检查重试入口。
-      void updateStore.init().catch((error) => console.warn('[AutoUpdate] Init failed:', error));
-      if (newState === 'READY') {
-        // 延迟 2s 执行，避开首屏渲染与聊天历史加载的 CPU 密集期
-        checkTimer = setTimeout(() => {
-          checkTimer = null;
-          void performCheck();
-        }, 2000);
-      }
-    },
-    { immediate: true },
-  );
+  if (isAndroid) {
+    watch(
+      () => lifecycleStore.state,
+      (newState) => {
+        if (checkTimer) clearTimeout(checkTimer);
+        checkTimer = null;
+        // 仅 Android 订阅 OTA 状态；失败保留手动检查重试入口。
+        void updateStore.init().catch((error) => console.warn('[AutoUpdate] Init failed:', error));
+        if (newState === 'READY') {
+          // 延迟 2s 执行，避开首屏渲染与聊天历史加载的 CPU 密集期
+          checkTimer = setTimeout(() => {
+            checkTimer = null;
+            void performCheck();
+          }, 2000);
+        }
+      },
+      { immediate: true },
+    );
+  }
 
   onScopeDispose(() => {
     if (checkTimer) clearTimeout(checkTimer);
   });
 
   const handleConfirm = async () => {
-    platformStore.require('apkUpdate');
+    if (!isAndroid) return;
     if (updateStore.state === 'readyToInstall') {
       // 已下载完成：直接安装
       try {

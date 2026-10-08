@@ -116,6 +116,7 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_vcp_mobile::init())
         // 命令注册表与「IPC 防爆栈总闸」均已收口至 commands.rs（含完整机制注释）；
         // 此处仅挂载。新增命令请直接编辑 commands.rs 的注册清单。

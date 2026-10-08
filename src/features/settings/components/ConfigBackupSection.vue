@@ -2,7 +2,7 @@
 import { ref } from "vue";
 import type { AppSettings } from "../../../core/stores/settings";
 import { useSettingsStore } from "../../../core/stores/settings";
-import { usePlatformStore } from "../../../core/stores/platform";
+import { isAndroid } from "../../../core/utils/platform";
 import SettingsActionWithStatus from "../../../components/settings/SettingsActionWithStatus.vue";
 import VcpConfirm from "../../../components/ui/VcpConfirm.vue";
 import {
@@ -26,7 +26,6 @@ const exportStatus = ref<Status>({ type: null, message: "" });
 const importStatus = ref<Status>({ type: null, message: "" });
 
 const settingsStore = useSettingsStore();
-const platformStore = usePlatformStore();
 
 // ------------------------------------------------------------------
 // 导出
@@ -97,7 +96,7 @@ const confirmImport = async () => {
 <template>
   <div class="space-y-5 px-1">
     <SettingsActionWithStatus
-      v-if="platformStore.isImplemented('fileExport')"
+      v-if="isAndroid"
       title="导出配置"
       description="用户身份与应用连接配置，保存到系统下载目录"
       button-variant="primary"
@@ -109,7 +108,7 @@ const confirmImport = async () => {
       @action-click="onExport"
     />
 
-    <div v-if="platformStore.isImplemented('fileExport')" class="border-t border-black/5 dark:border-white/5 pt-2"></div>
+    <div v-if="isAndroid" class="border-t border-black/5 dark:border-white/5 pt-2"></div>
 
     <SettingsActionWithStatus
       title="导入配置"

@@ -1,12 +1,9 @@
 # 移动端 UI 兼容性规范（Android / iOS）
 
 > 文档类型：产品支持与工程规范
-> Android 历史状态：`IMPLEMENTED / SOFTWARE-VERIFIED / DEVICE-EVIDENCE-PENDING`（原专项记录，不是本轮复验）
-> iOS 状态：`PHASE-2 / SOURCE-AUDIT`，尚无本项目 Apple 构建结果
-> Android 恢复基线：`cecdbe4`；iOS 启动基线：`4c6e25bb` 加任务开始时工作树，见 Phase 0 输入账本
-> 修订日期：2026-10-09；本文件接续原 Android UI 规范，保留 Android 契约并纳入 iOS 分期目标
+> 修订日期：2026-10-09
 
-平台编译隔离、能力与权限、差异化入口及错误提示见 [跨平台开发规范](./CROSS_PLATFORM_DEVELOPMENT.md)。本文件负责窗口、布局、CSS、Insets 和触控契约。
+Vue 运行时平台分支、原生编译隔离、权限与用户提示见 [跨平台开发规范](./CROSS_PLATFORM_DEVELOPMENT.md)。本文件负责窗口、布局、CSS、Insets 和触控契约；阶段进度与验证结果留在对应计划记录中。
 
 ## 1. 产品支持边界
 
@@ -16,9 +13,9 @@ VCP Mobile 当前 Android 生产运行、构建与发布覆盖以下目标：
 - Android `arm64-v8a` 触控平板；
 - Android `arm64-v8a` 折叠屏，按**当前应用窗口的可用 CSS 宽度**响应，不按设备名称或物理形态分叉。
 
-iPhone/iPad 原生客户端已进入分期实施，目标为同一 Vue/Rust 核心加 Swift adapter、单 Scene、当前窗口宽度响应，以及供用户自行签名的实验性 device 产物。首版包括 Chat/Diary/Settings/SQLite/手动 Sync、原生 Files/PHPicker/staging/大图处理和 iOS 26+ 尽力后台；其他情况使用前台常亮。minimum 采用 iOS/iPadOS 15.0 工程基线，Phase 2 显式接入配置并在 G1 编译核验，新 API 按 availability 分层。
+iPhone/iPad 原生客户端的目标为同一 Vue/Rust 核心加 Swift adapter、单 Scene、当前窗口宽度响应，以及供用户自行签名的实验性 device 产物。minimum 采用 iOS/iPadOS 15.0 工程基线，新 API 按 availability 分层。
 
-功能范围以 [D1–D19](../plan/vcpmobile-ios-compatibility-research/09-Magi综合裁决与待决策清单.md) 及用户最新的 [Phase 2 功能审批](../plan/vcpmobile-ios-compatibility-research/phase-2/09-功能权限与提示审议表.md) 为准。2026-10-09 审批已将 incoming/outgoing share、系统通知、相机、保存相册、网络遥测及 Distributed 纳入适配方向；具体技术范围和实施阶段分别安排，系统通知不自动等同完整 APNs 服务。语音保留入口并解释尚未开发；APK 更新和 Root 同样保留说明入口，不执行不适用的原生动作。视频抽帧等未更改项沿用既定范围。SSE 后台持续接收为本轮明确的重点要求，候选方案另行研究，尚不能以尽力后台表述为已经满足。以上为目标契约，不表示当前已具备对应实现；实施与证据见 [Phase 2](../plan/vcpmobile-ios-compatibility-research/phase-2/README.md)。
+功能范围以 [D1–D19](../plan/vcpmobile-ios-compatibility-research/09-Magi综合裁决与待决策清单.md) 及用户最新的 [功能审批](../plan/vcpmobile-ios-compatibility-research/phase-2/09-功能权限与提示审议表.md) 为准，最新逐项意见优先于旧建议。实施与证据见 [iOS 阶段记录](../plan/vcpmobile-ios-compatibility-research/README.md)，本规范不另行复制功能清单。
 
 下列平台明确不受支持：
 
@@ -50,7 +47,7 @@ Android 手机/平板/折叠屏与 iPhone/iPad 必须共用同一份 Vue 组件�
 
 `minSdk` 只规定 Android API 安装下限，不代表 WebView 特性下限。`vite.config.ts` 显式冻结 `build.target = "chrome87"` 与 `cssTarget = "chrome87"`，用于防止依赖升级静默抬高生成 JS/CSS 语法门槛；它不是 Android/WebView 产品支持声明，也不能替代 fallback 和设备验收。设备证据必须记录 Android API、WebView provider/version、viewport、density 与字体缩放；不能通过系统版本或 UA 猜测 WebView 能力。
 
-iOS 使用 WKWebView；当前 `chrome87` 构建配置不构成 Safari 兼容结论。Phase 4 按 minimum 和实际 DOM/生成 CSS/JS 补齐 WebKit 构建目标与 fallback，保留以下三层 CSS 契约。iPhone/iPad 输入控件目标字号至少 16 CSS px，触控命中区至少 44×44 CSS px（可用 hit slop 保持视觉密度）；文本选择优先于祖先长按手势。
+iOS 使用 WKWebView；当前 `chrome87` 构建配置不构成 Safari 兼容结论。WebKit 构建目标与 fallback 按 minimum 和实际 DOM/生成 CSS/JS 确定，保留以下三层 CSS 契约。iPhone/iPad 输入控件目标字号至少 16 CSS px，触控命中区至少 44×44 CSS px（可用 hit slop 保持视觉密度）；文本选择优先于祖先长按手势。
 
 CSS 按影响分为三层：
 
@@ -95,7 +92,7 @@ interface NativeInsetsSnapshot {
 
 `env(safe-area-inset-*, fallback)` 的 fallback 只在语法/变量不可用时生效，返回 `0` 时不会自动提供最小间距；需要最小顶距时必须用明确的 `max()` 或归一化规则表达。
 
-### 4.2 iOS 目标契约（Phase 4 实施）
+### 4.2 iOS 目标契约
 
 - 安全区来自 WKWebView CSS 环境量或经坐标换算的原生快照，确定一个权威来源；不能同时叠加。
 - Swift 的 point、屏幕坐标、WebView 坐标与 CSS px 显式转换，不能套用 Android raw px 除 DPR 的公式。
@@ -103,7 +100,7 @@ interface NativeInsetsSnapshot {
 - 归一化后继续消费共享 `--vcp-safe-*` 与 `--vcp-ime-offset`，不在组件中新增第二套 Insets owner。
 - iPad picker/dialog/popover 的锚点、旋转与分屏更新需沿实际 presentation owner 处理；应用内返回复用 modal/page/session 顺序，根返回保持应用，不调用 Android 最小化语义。
 
-原生 DTO、快照重放、单位和去重字段以 Phase 1/2 的实际实现落实；本节不把尚未存在的 Swift API 描述为当前代码。
+原生 DTO、快照重放、单位和去重字段沿实际实现核对；本节的目标契约不表示 Swift 适配已经完成。
 
 ## 5. 强渲染不退化
 
@@ -122,15 +119,7 @@ interface NativeInsetsSnapshot {
 
 以下保留 Android UI 改动的验证要求。iOS 日常按源码入口、目标 cfg、字段、分支和资源释放逐条审计，必要时运行 host 辅助检查；Apple 构建只在 G1/G2 阶段通过 GitHub Actions 手动执行。项目现在及后续均不建设 iOS 实机测试体系，也不将下节 Android 设备矩阵扩展为 iOS 门禁。具体执行边界见 [07](../plan/vcpmobile-ios-compatibility-research/07-CI测试矩阵与无设备验证边界.md)。
 
-每个修改 Android shell、侧栏、Overlay、CSS fallback 或 Insets 的 PR，至少满足：
-
-- `pnpm check`；
-- `pnpm test:run`；
-- 生产 `pnpm build`，确认实际生成 CSS/JS；
-- 布局契约测试覆盖三种宽度模式、窗口变化、抽屉可达性与主区 `min-width: 0`；
-- 样式治理测试覆盖关键 `color-mix()` fallback、受控 blur、语义 z-index 与安全区变量；
-- Insets 纯函数/事件契约覆盖四边、DPR 转换、IME 净增量、重放和旧字段兼容；
-- 强渲染 fixture 的语义和交互不变量不退化。
+修改 Android shell、侧栏、Overlay、CSS fallback 或 Insets 时，按根规范完成 `pnpm check`，并围绕本次尚未确定的问题选择验证。布局变化关注实际窗口与抽屉可达性；构建或样式转换关注生产生成物；Insets 变化关注单位、键盘净增量和事件重放；消息界面变化关注受影响的渲染与交互。无需为无关改动重复整套测试矩阵。
 
 Vitest + happy-dom 可以证明状态、DOM 契约和生成物静态约束，但不计算真实 CSS 几何。仓库当前没有 Playwright 桌面 E2E，也没有 Maestro flow；不得把二者写成现有门禁。Android 设备诊断采用仓库已有的 Debug-only Agent CLI，真机截图与触控可达性仍需具名设备证据，不能由 CLI 状态快照替代。
 
@@ -152,7 +141,7 @@ Vitest + happy-dom 可以证明状态、DOM 契约和生成物静态约束，但
 
 每个状态同时检查浅色/深色、字体 1.0×/1.5×、长内容、四边安全区、键盘开合与 Android 返回手势。模拟 viewport 只能作为前置筛查，不能替代目标 Android WebView 的截图与触控验证。
 
-Android 原专项记录状态为 `SOFTWARE-VERIFIED / DEVICE-EVIDENCE-PENDING`：当时工作树已通过 `pnpm check`、前端全量测试、生产构建、Android 插件 strict JVM 测试与 Android 生成树初始化；这不是本轮工作树的复验结论，也不等于手机、平板、折叠屏和最低 WebView 已通过发布验收。具名设备报告归档前不得写成 `DEVICE-VERIFIED`。
+设备兼容结论应指向相应具名设备记录；源码、host 检查和构建结果不代替实际设备证据。
 
 ## 8. 性能边界
 

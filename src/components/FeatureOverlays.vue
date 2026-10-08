@@ -16,7 +16,7 @@
 import { defineAsyncComponent, ref, watch } from 'vue';
 import { useOverlayStore } from '../core/stores/overlay';
 import { useSettingsStore } from '../core/stores/settings';
-import { usePlatformStore } from '../core/stores/platform';
+import { isAndroid } from '../core/utils/platform';
 import ToolInteractionOverlay from '../features/distributed/ToolInteractionOverlay.vue';
 
 // 相对低频的设置页按需懒加载：用户首次打开时才下载 chunk，SlidePage 动画天然遮盖加载延迟
@@ -42,7 +42,6 @@ const TarvenSettingsView = defineAsyncComponent(() => import('../features/chat/c
 
 const overlayStore = useOverlayStore();
 const settingsStore = useSettingsStore();
-const platformStore = usePlatformStore();
 
 const createFirstOpenLatch = (isOpen: () => boolean) => {
   const mounted = ref(isOpen());
@@ -110,7 +109,7 @@ const globalSearchMounted = createFirstOpenLatch(() => overlayStore.isGlobalSear
     />
 
     <DistributedView
-      v-if="distributedMounted && platformStore.isImplemented('distributed')"
+      v-if="distributedMounted"
       :is-open="overlayStore.isDistributedOpen"
       :z-index="overlayStore.getPageZIndex('distributed')"
       @close="overlayStore.closeDistributed()"
@@ -124,7 +123,7 @@ const globalSearchMounted = createFirstOpenLatch(() => overlayStore.isGlobalSear
     />
 
     <VcpCliManifestView
-      v-if="cliManifestMounted && platformStore.isImplemented('cli')"
+      v-if="cliManifestMounted && isAndroid"
       :is-open="overlayStore.isCliManifestOpen"
       :z-index="overlayStore.getPageZIndex('cliManifest')"
       @close="overlayStore.closeCliManifest()"
@@ -191,7 +190,7 @@ const globalSearchMounted = createFirstOpenLatch(() => overlayStore.isGlobalSear
       </template>
     </Suspense>
 
-    <!-- 仅当用户已启用分布式计算时才挂载事件监听器，避免常驻不必要的后台监听 -->
-    <ToolInteractionOverlay v-if="platformStore.isImplemented('distributed') && settingsStore.settings?.distributedEnabled" />
+    <!-- 设备工具交互目前仅接入 Android；用户启用节点后才挂载对应监听。 -->
+    <ToolInteractionOverlay v-if="isAndroid && settingsStore.settings?.distributedEnabled" />
   </div>
 </template>

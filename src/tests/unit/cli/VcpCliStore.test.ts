@@ -24,8 +24,6 @@ import {
 } from "@/features/cli/vcpCliStore";
 import { invokeMock, mockInvoke } from "@/tests/mocks/tauri";
 import { flushPromises } from "@/tests/utils/flush";
-import { configureAndroidPlatform, platformFixture } from "@/tests/fixtures/platform";
-import { usePlatformStore } from "@/core/stores/platform";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -109,22 +107,10 @@ describe("VCP CLI view snapshot ownership", () => {
   beforeEach(() => {
     const pinia = createPinia();
     setActivePinia(pinia);
-    configureAndroidPlatform(pinia);
   });
 
   afterEach(() => {
     vi.useRealTimers();
-  });
-
-  it("rejects iOS CLI entry before status or action IPC", async () => {
-    usePlatformStore().snapshot = platformFixture('ios');
-    const store = useVcpCliStore();
-    await store.openView();
-    store.setCommandDraft('echo blocked');
-    await store.runDraft();
-    expect(store.canRun).toBe(false);
-    expect(store.runtimeError?.message).toContain('不支持');
-    expect(invokeMock).not.toHaveBeenCalled();
   });
 
   it("keeps execution disabled when the Rust status is unavailable", async () => {

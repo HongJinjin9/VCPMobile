@@ -8,7 +8,7 @@ import AttachmentRenderer from './AttachmentRenderer.vue';
 import { useChatHistoryStore } from "../../../core/stores/chatHistoryStore";
 import { useOverlayStore } from "../../../core/stores/overlay";
 import { useNotificationStore } from "../../../core/stores/notification";
-import { usePlatformStore } from "../../../core/stores/platform";
+import { isAndroid, isIOS } from "../../../core/utils/platform";
 import type { Attachment } from "../../../core/types/chat";
 
 const props = defineProps<{
@@ -75,8 +75,18 @@ const openExternal = async (path: string) => {
     });
     return;
   }
+  if (!isAndroid) {
+    notificationStore.addNotification({
+      type: "info",
+      title: "原生文件打开暂不可用",
+      message: isIOS
+        ? "当前 iOS 版本尚未接入此类文件的原生打开方式，附件仍保留。"
+        : "当前预览环境不提供原生文件打开。",
+      toastOnly: true,
+    });
+    return;
+  }
   try {
-    usePlatformStore().require('fileOpen');
     await invoke("open_file", { path });
   } catch (e) {
     console.error("[AttachmentPreview] Open failed:", e);

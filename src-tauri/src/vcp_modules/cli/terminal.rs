@@ -48,9 +48,6 @@ pub async fn open_vcp_mobile_cli_terminal<R: Runtime>(
     runtime: State<'_, MobileCliRuntimeState>,
     request: OpenVcpMobileCliTerminalRequest,
 ) -> Result<OpenCliPtyResponse, String> {
-    crate::vcp_modules::infra::platform::require_capability(
-        crate::vcp_modules::infra::platform::CapabilityName::Cli,
-    )?;
     validate_identity(&request.operation_id, None, 0)?;
     if !(1..=1_000).contains(&request.rows) || !(1..=1_000).contains(&request.cols) {
         return Err("terminal dimensions are outside the supported range".to_string());
@@ -90,9 +87,6 @@ pub async fn read_vcp_mobile_cli_terminal<R: Runtime>(
     app: AppHandle<R>,
     request: ReadCliPtyRequest,
 ) -> Result<ReadCliPtyResponse, String> {
-    crate::vcp_modules::infra::platform::require_capability(
-        crate::vcp_modules::infra::platform::CapabilityName::Cli,
-    )?;
     validate_identity(
         &request.operation_id,
         Some(&request.session_id),
@@ -128,9 +122,6 @@ pub async fn write_vcp_mobile_cli_terminal<R: Runtime>(
     app: AppHandle<R>,
     request: WriteCliPtyRequest,
 ) -> Result<WriteCliPtyResponse, String> {
-    crate::vcp_modules::infra::platform::require_capability(
-        crate::vcp_modules::infra::platform::CapabilityName::Cli,
-    )?;
     validate_identity(
         &request.operation_id,
         Some(&request.session_id),
@@ -158,9 +149,6 @@ pub async fn resize_vcp_mobile_cli_terminal<R: Runtime>(
     app: AppHandle<R>,
     request: ResizeCliPtyRequest,
 ) -> Result<ResizeCliPtyResponse, String> {
-    crate::vcp_modules::infra::platform::require_capability(
-        crate::vcp_modules::infra::platform::CapabilityName::Cli,
-    )?;
     validate_identity(
         &request.operation_id,
         Some(&request.session_id),
@@ -186,9 +174,6 @@ pub async fn close_vcp_mobile_cli_terminal<R: Runtime>(
     app: AppHandle<R>,
     request: CloseCliPtyRequest,
 ) -> Result<CloseCliPtyResponse, String> {
-    crate::vcp_modules::infra::platform::require_capability(
-        crate::vcp_modules::infra::platform::CapabilityName::Cli,
-    )?;
     validate_identity(
         &request.operation_id,
         Some(&request.session_id),

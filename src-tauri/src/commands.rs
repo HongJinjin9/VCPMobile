@@ -80,7 +80,6 @@ macro_rules! app_command_handler {
             get_core_status, get_last_error, get_system_snapshot, reconcile_distributed_node_cmd,
             restart_or_exit_app,
         };
-        use crate::vcp_modules::infra::platform::get_platform_capabilities;
         use crate::vcp_modules::logcenter::{logcenter_clear_server, logcenter_fetch};
         use crate::vcp_modules::mail::{
             mail_attachment, mail_folders, mail_list, mail_mark, mail_move, mail_read, mail_reply,
@@ -332,7 +331,6 @@ macro_rules! app_command_handler {
                 get_boot_trace,
                 get_core_status,
                 get_last_error,
-                get_platform_capabilities,
                 get_system_snapshot,
                 restart_or_exit_app,
                 save_boot_trace,

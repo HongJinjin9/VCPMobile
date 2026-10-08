@@ -12,18 +12,6 @@ private struct NativeProtocolAcknowledgement: Encodable {
     let protocolVersion = 1
 }
 
-private struct NativeCapability: Encodable {
-    let implemented = true
-    let runtime: String
-}
-
-private struct NativeCapabilities: Encodable {
-    let protocolVersion = 1
-    let platform = "ios"
-    let lifecycle: NativeCapability
-    let networkEvents: NativeCapability
-}
-
 private enum LifecyclePhase: String, Encodable {
     case active, inactive, background
 }
@@ -59,7 +47,6 @@ final class VcpMobilePlugin: Plugin {
     private var generation = UUID()
     private var lastDeliveredPhase: LifecyclePhase?
     private var lastNetworkConnected: Bool?
-    private var sourceFailed = false
 
     @objc override func load(webview: WKWebView) {
         DispatchQueue.main.async { [weak self] in
@@ -74,20 +61,6 @@ final class VcpMobilePlugin: Plugin {
                     self.failSubscription(error)
                 }
             }
-        }
-    }
-
-    @objc public func getNativeCapabilities(_ invoke: Invoke) {
-        // Tauri selectors execute on its IPC queue, not the UIKit queue.
-        DispatchQueue.main.async { [self] in
-            let lifecycleRuntime = sourceFailed ? "unavailable"
-                : (channel != nil && lastDeliveredPhase != nil ? "available" : "unknown")
-            let networkRuntime = sourceFailed ? "unavailable"
-                : (lastNetworkConnected != nil ? "available" : "unknown")
-            invoke.resolve(NativeCapabilities(
-                lifecycle: NativeCapability(runtime: lifecycleRuntime),
-                networkEvents: NativeCapability(runtime: networkRuntime)
-            ))
         }
     }
 
@@ -111,7 +84,6 @@ final class VcpMobilePlugin: Plugin {
     private func replaceSubscription(_ newChannel: Channel) throws {
         dispatchPrecondition(condition: .onQueue(.main))
         invalidateSubscription()
-        sourceFailed = false
         channel = newChannel
         let subscriptionGeneration = generation
         installLifecycleObservers(generation: subscriptionGeneration)
@@ -261,7 +233,6 @@ final class VcpMobilePlugin: Plugin {
 
     private func failSubscription(_ error: Error) {
         invalidateSubscription()
-        sourceFailed = true
         NSLog("[VcpMobilePlugin] Native event source failed: %@", error.localizedDescription)
     }
 

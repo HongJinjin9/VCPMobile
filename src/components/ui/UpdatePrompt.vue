@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { useModalHistory } from '../../core/composables/useModalHistory';
 import { useUpdateStore } from '../../core/stores/update';
-import { usePlatformStore } from '../../core/stores/platform';
+import { isAndroid } from '../../core/utils/platform';
 import { marked } from 'marked';
 import { withCodeBlockClass } from '../../core/utils/astRenderer';
 import DOMPurify from 'dompurify';
@@ -26,12 +26,11 @@ const emit = defineEmits<{
 const { registerModal, unregisterModal } = useModalHistory();
 const modalId = 'UpdatePrompt';
 const updateStore = useUpdateStore();
-const platformStore = usePlatformStore();
 
 watch(
   () => props.isOpen,
   (newVal) => {
-    if (newVal) {
+    if (newVal && isAndroid) {
       registerModal(modalId, () => {
         emit('dismiss');
         emit('update:isOpen', false);
@@ -101,7 +100,7 @@ const openReleasePage = () => {
 };
 
 const openInstallPermission = () => {
-  platformStore.require('apkUpdate');
+  if (!isAndroid) return;
   invoke('plugin:vcp-mobile|open_unknown_sources_settings').catch((e) =>
     console.warn('[UpdatePrompt] open unknown sources settings failed:', e),
   );
@@ -118,7 +117,7 @@ const cancelDownload = () => {
   <Teleport to="body">
     <Transition name="prompt-fade">
       <div
-        v-if="isOpen"
+        v-if="isOpen && isAndroid"
         class="fixed inset-0 z-dialog flex items-start justify-center pt-[12vh] bg-black/65"
         @click.self="handleDismiss"
       >

@@ -7,7 +7,7 @@ import { useChatStreamStore } from '../../core/stores/chatStreamStore';
 import { useAttachmentStore } from '../../core/stores/attachmentStore';
 import { useNotificationStore } from '../../core/stores/notification';
 import { useTarvenStore } from '../../core/stores/tarvenStore';
-import { usePlatformStore } from '../../core/stores/platform';
+import { isAndroid, isIOS } from '../../core/utils/platform';
 import { useLongTextPaste } from './composables/useLongTextPaste';
 import { useSpeechRecognition } from '../../core/composables/useSpeechRecognition';
 import { useAudioRecorder } from '../../core/composables/useAudioRecorder';
@@ -21,7 +21,6 @@ import { splitMentionSegments } from '../../core/utils/mention';
 import type { AttachmentData } from '../../core/types/chat';
 
 const tarvenStore = useTarvenStore();
-const platformStore = usePlatformStore();
 
 const openTarvenSelector = () => {
   if (props.disabled) return;
@@ -79,9 +78,23 @@ let iconTouchStartTime = 0;
 let isIconLongPress = false;
 let iconLongPressTimeout: number | null = null;
 
+const explainVoiceUnavailable = () => {
+  notificationStore.addNotification({
+    type: 'info',
+    title: '语音输入尚未开发',
+    message: '当前 iOS 版本尚未提供语音输入，可继续输入文字。',
+    toastOnly: true,
+  });
+};
+
+const handleVoiceClick = () => {
+  // touchstart.prevent 阻止触摸合成 click；独立指针、键盘和辅助技术仍可查看说明。
+  if (!props.disabled && isIOS) explainVoiceUnavailable();
+};
+
 // 切换语音模式与普通文本模式
 const toggleAudioMode = () => {
-  if (props.disabled || !platformStore.isImplemented('voiceRecording')) return;
+  if (props.disabled || !isAndroid) return;
   
   attachMenuOpen.value = false;
   
@@ -112,7 +125,7 @@ const toggleAudioMode = () => {
 // 交互 A：在“按住 说话”大长条上的 STT 手势管理
 // ----------------------------------------------------
 const handleSTTTouchStart = async (e: TouchEvent) => {
-  if (props.disabled || !platformStore.isImplemented('voiceRecording')) return;
+  if (props.disabled || !isAndroid) return;
   if (e.cancelable) e.preventDefault(); // 阻断默认上下文菜单与滚动
 
   isSTTActive.value = true;
@@ -192,7 +205,12 @@ const handleSTTTouchCancel = (e: TouchEvent) => {
 // 交互 B：直接长按左侧语音按钮，进行附件录制并松手直发
 // ----------------------------------------------------
 const handleIconTouchStart = (e: TouchEvent) => {
-  if (props.disabled || !platformStore.isImplemented('voiceRecording')) return;
+  if (props.disabled) return;
+  if (isIOS) {
+    explainVoiceUnavailable();
+    return;
+  }
+  if (!isAndroid) return;
   
   // 核心修复：如果当前已经处于“按住说话”模式，点击此按钮是为了切回键盘，直接触发 Tap 切换！
   // 彻底解决了由于 touchstart.prevent 导致 click 无法触发的“点不回去”手势缺陷！
@@ -237,6 +255,7 @@ const handleIconTouchMove = (e: TouchEvent) => {
 
 const handleIconTouchEnd = async (e: TouchEvent) => {
   if (e.cancelable) e.preventDefault();
+  if (!isAndroid) return;
   
   if (iconLongPressTimeout) {
     clearTimeout(iconLongPressTimeout);
@@ -577,11 +596,13 @@ onUnmounted(() => {
         
         <!-- 左侧：语音/键盘切换及长按附件录制按钮 -->
         <button
-          v-if="platformStore.isImplemented('voiceRecording')"
+          v-if="isAndroid || isIOS"
           @touchstart.prevent="handleIconTouchStart"
           @touchmove="handleIconTouchMove"
           @touchend="handleIconTouchEnd"
           @touchcancel="handleIconTouchCancel"
+          @click="handleVoiceClick"
+          :aria-label="isIOS ? '语音输入（尚未开发）' : isAudioMode ? '切换文字输入' : '语音输入'"
           class="w-9 h-9 mb-0.5 flex items-center justify-center shrink-0 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[var(--primary-text)] opacity-90 active:scale-90 transition-all relative select-none touch-none"
           :class="{ 
             'bg-blue-500/10 text-blue-500': isAudioMode || isLongPressRecording,
@@ -776,7 +797,7 @@ onUnmounted(() => {
         :class="attachMenuOpen ? 'translate-y-0 opacity-100 scale-100' : 'translate-y-4 opacity-0 scale-95'"
       >
         <!-- 拍摄按钮 -->
-        <button v-if="platformStore.isImplemented('camera')" @click="triggerFilePick('camera')"
+        <button v-if="isAndroid" @click="triggerFilePick('camera')"
           class="group flex flex-col items-center gap-1.5 active:scale-95 transition-all outline-none"
         >
           <div class="w-13 h-13 flex items-center justify-center rounded-2xl bg-black/5 dark:bg-white/5 border border-[var(--border-color)]/30 group-hover:border-[var(--highlight-text)]/40 transition-all shadow-inner">

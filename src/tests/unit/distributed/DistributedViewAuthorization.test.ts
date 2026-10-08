@@ -1,10 +1,17 @@
 import { flushPromises } from "@vue/test-utils";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import DistributedView from "@/features/distributed/DistributedView.vue";
 import { useNotificationStore } from "@/core/stores/notification";
+import { useSettingsStore } from "@/core/stores/settings";
 import { invokeMock, mockInvoke } from "@/tests/mocks/tauri";
 import { mountWithPinia } from "@/tests/utils/mount";
-import { configureAndroidPlatform } from "@/tests/fixtures/platform";
+
+const testPlatform = vi.hoisted(() => ({ value: 'android' as 'android' | 'ios' }));
+vi.mock("@/core/utils/platform", () => ({
+  get nativePlatform() { return testPlatform.value; },
+  get isAndroid() { return testPlatform.value === 'android'; },
+  get isIOS() { return testPlatform.value === 'ios'; },
+}));
 
 interface ToolFixture {
   name: string;
@@ -67,7 +74,7 @@ function installBaseMocks(tools: ToolFixture[]) {
 async function mountOpenView() {
   const wrapper = mountWithPinia(DistributedView, {
     props: { isOpen: true },
-  }, configureAndroidPlatform);
+  });
   await wrapper.get('[data-distributed-tab="plugins"]').trigger("click");
   return wrapper;
 }
@@ -83,11 +90,114 @@ async function waitForCatalog() {
   await flushPromises();
 }
 
+beforeEach(() => {
+  testPlatform.value = 'android';
+});
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
 describe("DistributedView explicit tool authorization", () => {
+  it("explains iOS Root support without requesting native Root access", async () => {
+    testPlatform.value = 'ios';
+    installBaseMocks([]);
+
+    const wrapper = mountWithPinia(DistributedView, { props: { isOpen: true } });
+    try {
+      await flushPromises();
+      const rootButton = wrapper.findAll('button').find(button => button.text() === 'Root 说明');
+      expect(rootButton).toBeDefined();
+      await rootButton!.trigger('click');
+
+      expect(invokeMock.mock.calls.some(([command]) => [
+        'plugin:vcp-mobile|check_root_access',
+        'plugin:vcp-mobile|launch_root_manager',
+        'plugin:vcp-mobile|run_root_command',
+      ].includes(command))).toBe(false);
+      expect(useNotificationStore().activeToasts).toHaveLength(1);
+      expect(useNotificationStore().activeToasts[0].message).toContain('iOS');
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
+  it("waits for loaded connection fields and saves once without starting an iOS node", async () => {
+    testPlatform.value = 'ios';
+    installBaseMocks([]);
+    const loaded = {
+      distributedDeviceName: 'Tablet',
+      distributedWsUrl: 'wss://configured.example/ws',
+      distributedVcpKey: 'configured-key',
+    };
+    const read = deferred<typeof loaded>();
+    const save = deferred<typeof loaded>();
+    mockInvoke('read_settings', () => read.promise);
+    mockInvoke('update_settings', () => save.promise);
+    const wrapper = mountWithPinia(DistributedView, { props: { isOpen: true } });
+    try {
+      await flushPromises();
+      const button = wrapper.findAll('button').find(item => item.text() === '保存配置')!;
+      expect(button.attributes()).toHaveProperty('disabled');
+      await button.trigger('click');
+      expect(invokeMock.mock.calls.some(([command]) => command === 'update_settings')).toBe(false);
+
+      read.resolve(loaded);
+      await flushPromises();
+      expect(button.attributes()).not.toHaveProperty('disabled');
+      await button.trigger('click');
+      await flushPromises();
+      expect(button.attributes()).toHaveProperty('disabled');
+      await button.trigger('click');
+      const writes = invokeMock.mock.calls.filter(([command]) => command === 'update_settings');
+      expect(writes).toEqual([['update_settings', { updates: loaded }]]);
+
+      save.resolve(loaded);
+      await flushPromises();
+      expect(useNotificationStore().activeToasts.filter(notice => notice.type === 'success')).toHaveLength(1);
+      expect(button.attributes()).not.toHaveProperty('disabled');
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
+  it("keeps failed connection loading unsaveable until an explicit reload succeeds", async () => {
+    testPlatform.value = 'ios';
+    installBaseMocks([]);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const fresh = {
+      distributedDeviceName: 'Reloaded tablet',
+      distributedWsUrl: 'wss://reloaded.example/ws',
+      distributedVcpKey: 'reloaded-key',
+    };
+    mockInvoke('update_settings', () => fresh);
+    const wrapper = mountWithPinia(DistributedView, { props: { isOpen: true } });
+    try {
+      await flushPromises();
+      expect(useSettingsStore().settings?.distributedDeviceName).toBe('Phone');
+      await wrapper.setProps({ isOpen: false });
+      mockInvoke('read_settings', async () => { throw new Error('read unavailable'); });
+      await wrapper.setProps({ isOpen: true });
+      await flushPromises();
+      expect(wrapper.get('[role="alert"]').text()).toContain('加载失败');
+      const saveButton = wrapper.findAll('button').find(item => item.text() === '保存配置')!;
+      expect(saveButton.attributes()).toHaveProperty('disabled');
+      await saveButton.trigger('click');
+      expect(invokeMock.mock.calls.some(([command]) => command === 'update_settings')).toBe(false);
+
+      mockInvoke('read_settings', () => fresh);
+      await wrapper.findAll('button').find(item => item.text() === '重新加载')!.trigger('click');
+      await flushPromises();
+      expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+      expect(saveButton.attributes()).not.toHaveProperty('disabled');
+      await saveButton.trigger('click');
+      await flushPromises();
+      expect(invokeMock).toHaveBeenCalledWith('update_settings', { updates: fresh });
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
   it("renders a stable fail-closed catalog independently of settings and config failures", async () => {
     const consoleError = vi
       .spyOn(console, "error")
@@ -158,7 +268,7 @@ describe("DistributedView explicit tool authorization", () => {
 
     const wrapper = mountWithPinia(DistributedView, {
       props: { isOpen: true },
-    }, configureAndroidPlatform);
+    });
     await vi.waitFor(() => {
       expect(
         wrapper

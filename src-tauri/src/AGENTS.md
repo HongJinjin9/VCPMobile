@@ -78,7 +78,9 @@ app 层 Tauri command 统一在 `commands.rs` 的 `app_command_handler!` 中导�
 
 `plugin:*` 命令属于 Tauri 插件路径，不经过 app command 清单；修改 `vcp-mobile` 插件时遵循 `../plugins/vcp-mobile/AGENTS.md`。
 
-`infra/platform.rs` 提供编译目标与 typed 平台能力，iOS 查询经插件读取 Swift adapter 的实际运行观测；原生副作用的领域 command 同时检查能力，不能只依赖 UI 隐藏。当前 app command 总闸仅接受 `main` WebView；插件/core 命令另由分平台 capability 文件授权。Android/iOS 生命周期 phase/nativeSequence/snapshot 经原 Rust owner 归约，native sequence 与 Rust transition epoch 分别排序；iOS 的 network Channel 只给现有前端恢复逻辑提供重试提示，不代表完整设备遥测可用。
+领域命令按真实输入、任务和系统资源处理执行条件，不复制 Vue 的产品入口决定或要求统一能力门禁。原生平台差异收在实际适配位置；读取状态、取消和清理按各自资源生命周期执行。具体约定见 [跨平台开发规范](../../docs/CROSS_PLATFORM_DEVELOPMENT.md)。
+
+当前 app command 总闸仅接受 `main` WebView；插件/core 命令另由分平台 capability 文件配置。Android/iOS 生命周期 phase/nativeSequence/snapshot 经原 Rust owner 归约，native sequence 与 Rust transition epoch 分别排序；iOS 的 network Channel 只给现有前端恢复逻辑提供重试提示，不代表完整设备遥测可用。
 
 ### 4.2 JavaBridge 栈边界
 

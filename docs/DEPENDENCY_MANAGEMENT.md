@@ -48,6 +48,7 @@ Tauri 核心组件必须**严格同版本或遵循官方发布的兼容矩阵**�
 | `tauri-build` | `2.7.1` | 与 `tauri` 同步检查 | crates.io | Build script 依赖，版本独立于 tauri core |
 | `tauri-plugin-log` | `2.9.0` | 每季度检查 | crates.io | 日志插件 |
 | `tauri-plugin-opener` | `2.5.4` | 每季度检查 | crates.io | 系统打开器插件 |
+| `tauri-plugin-os` | `2.4.0` | 按平台信息需求检查 | crates.io | 与前端绑定配套，提供启动时注入的平台身份 |
 | `serde` | `1` | 仅安全补丁 | crates.io | 序列化基石，极稳定 |
 | `serde_json` | `1` | 仅安全补丁 | crates.io | — |
 | `tokio` | `1` | 仅安全补丁 | crates.io | 异步运行时 |
@@ -95,6 +96,7 @@ Tauri 核心组件必须**严格同版本或遵循官方发布的兼容矩阵**�
 |------|-------------|-------------|-------------|------|
 | `@tauri-apps/api` | `2.12.1` | 与 `tauri` crate 同步 | npm | 根应用与本地插件必须保持一致 |
 | `@tauri-apps/plugin-opener` | `2.5.4` | 与 `tauri-plugin-opener` 同步 | npm | 插件前端绑定 |
+| `@tauri-apps/plugin-os` | `2.4.0` | 与 `tauri-plugin-os` 同步 | npm | 仅由统一平台入口消费同步 `platform()` |
 | `vue` | `^3.5.41` | 每月检查 | npm | 核心框架 |
 | `vue-router` | `^5.0.6` | 每月检查 | npm | 路由 |
 | `pinia` | `^3.0.4` | 每月检查 | npm | 状态管理 |

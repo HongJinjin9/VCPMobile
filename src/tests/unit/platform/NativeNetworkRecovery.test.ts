@@ -19,8 +19,10 @@ vi.mock('../../../core/stores/appLifecycle', () => ({
 vi.mock('../../../core/stores/chatStreamStore', () => ({
   useChatStreamStore: () => ({ checkAndRecoverInterruptedStreams: recover }),
 }));
-vi.mock('../../../core/stores/platform', () => ({
-  usePlatformStore: () => ({ platform: 'ios' }),
+vi.mock('../../../core/utils/platform', () => ({
+  nativePlatform: 'ios',
+  isAndroid: false,
+  isIOS: true,
 }));
 
 describe('native network recovery', () => {

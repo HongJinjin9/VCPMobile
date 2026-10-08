@@ -4,7 +4,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { deleteTempFile, pickFile } from "tauri-plugin-vcp-mobile";
 import { useAssistantStore } from "../../../core/stores/assistant";
 import { useNotificationStore } from "../../../core/stores/notification";
-import { usePlatformStore } from "../../../core/stores/platform";
+import { isAndroid, isIOS } from "../../../core/utils/platform";
 import type { AppSettings } from "../../../core/stores/settings";
 import SettingsCard from "../../../components/settings/SettingsCard.vue";
 import SettingsTextField from "../../../components/settings/SettingsTextField.vue";
@@ -40,9 +40,19 @@ const releaseAvatarWorkingCopy = async () => {
 
 const triggerFileInput = async () => {
   if (isPickingAvatar.value || isCropping.value || isSavingAvatar.value) return;
+  if (!isAndroid) {
+    notificationStore.addNotification({
+      type: "info",
+      title: "头像选图暂不可用",
+      message: isIOS
+        ? "当前 iOS 版本尚未接入头像选图，现有头像仍可正常使用。"
+        : "当前预览环境不提供原生头像选图。",
+      toastOnly: true,
+    });
+    return;
+  }
   isPickingAvatar.value = true;
   try {
-    usePlatformStore().require('photoPicker');
     await releaseAvatarWorkingCopy();
     const picked = await pickFile("avatar");
     if (disposed) {

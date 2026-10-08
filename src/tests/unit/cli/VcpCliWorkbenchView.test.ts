@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import VcpCliManifestView from "@/features/cli/components/VcpCliManifestView.vue";
 import { useModalHistory } from "@/core/composables/useModalHistory";
 import {
@@ -15,7 +15,10 @@ import {
 import { invokeMock, mockInvoke } from "@/tests/mocks/tauri";
 import { flushPromises } from "@/tests/utils/flush";
 import { mountWithPinia } from "@/tests/utils/mount";
-import { configureAndroidPlatform } from "@/tests/fixtures/platform";
+
+vi.mock("@/core/utils/platform", () => ({
+  nativePlatform: "android", isAndroid: true, isIOS: false,
+}));
 
 const CHECK_PERMISSIONS_COMMAND = "plugin:vcp-mobile|check_all_permissions";
 const REQUEST_PERMISSION_COMMAND = "plugin:vcp-mobile|request_android_permission";
@@ -59,7 +62,7 @@ async function mountView() {
   const wrapper = mountWithPinia(VcpCliManifestView, {
     props: { isOpen: true, zIndex: 44 },
     global: { stubs: { VcpCliTerminalPanel: true } },
-  }, configureAndroidPlatform);
+  });
   await wrapper.get('[data-vcp-cli-tab="jobs"]').trigger("click");
   return wrapper;
 }

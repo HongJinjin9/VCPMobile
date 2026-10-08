@@ -5,8 +5,6 @@ import { shareFileNative } from "tauri-plugin-vcp-mobile";
 import { useSyncSessionStore } from "@/core/stores/syncSession";
 import { useOverlayStore } from "@/core/stores/overlay";
 import { useNotificationStore } from "@/core/stores/notification";
-import { configureAndroidPlatform, platformFixture } from "@/tests/fixtures/platform";
-import { usePlatformStore } from "@/core/stores/platform";
 import SyncSessionView from "@/features/sync/SyncSessionView.vue";
 import SyncLogBrowserCore from "@/features/settings/components/SyncLogBrowserCore.vue";
 import {
@@ -15,6 +13,13 @@ import {
   listenMock,
   mockInvoke,
 } from "@/tests/mocks/tauri";
+
+const testPlatform = vi.hoisted(() => ({ value: 'android' as 'android' | 'ios' }));
+vi.mock("@/core/utils/platform", () => ({
+  get nativePlatform() { return testPlatform.value; },
+  get isAndroid() { return testPlatform.value === 'android'; },
+  get isIOS() { return testPlatform.value === 'ios'; },
+}));
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -45,9 +50,9 @@ function syncError(
 
 describe("sync session ownership", () => {
   beforeEach(() => {
+    testPlatform.value = 'android';
     const pinia = createPinia();
     setActivePinia(pinia);
-    configureAndroidPlatform(pinia);
     vi.mocked(shareFileNative).mockClear();
     mockInvoke("stop_sync", () => undefined);
     mockInvoke("plugin:vcp-mobile|get_battery_status", () => ({
@@ -65,7 +70,7 @@ describe("sync session ownership", () => {
   });
 
   it("keeps a missing iOS battery adapter explicit and preserves warning-and-continue sync", async () => {
-    usePlatformStore().snapshot = platformFixture('ios');
+    testPlatform.value = 'ios';
     const store = useSyncSessionStore();
     store.open();
     await store.startSync();

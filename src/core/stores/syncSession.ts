@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useDataReload } from "../composables/useDataReload";
 import { useNotificationStore } from "./notification";
-import { usePlatformStore } from "./platform";
+import { isAndroid } from "../utils/platform";
 import type { BatteryStatusDto } from "../types/native";
 
 type SyncStatus =
@@ -471,36 +471,38 @@ export const useSyncSessionStore = defineStore("syncSession", () => {
     }
     if (!isCurrentAttempt(generation, attempt)) return;
 
-    // 原生设备电量与省电检测保障
-    try {
-      // 未实现或未知时沿用真实读取失败的警告路径，不制造电量/省电成功值。
-      usePlatformStore().require('batteryStatus');
-      const battery = await invoke<BatteryStatusDto>(
-        "plugin:vcp-mobile|get_battery_status",
-      );
-      if (!isCurrentAttempt(generation, attempt)) return;
-      if (battery) {
-        pushLog("success", "设备状态检查完成");
+    // 当前电量 adapter 仅 Android 接通；其他平台沿用无法确认后继续的策略。
+    if (isAndroid) {
+      try {
+        const battery = await invoke<BatteryStatusDto>(
+          "plugin:vcp-mobile|get_battery_status",
+        );
+        if (!isCurrentAttempt(generation, attempt)) return;
+        if (battery) {
+          pushLog("success", "设备状态检查完成");
 
-        if (battery.isPowerSaveMode) {
-          const terminal = localTerminalError("POWER_SAVE_MODE");
-          pushLog("error", terminal.message);
-          setTerminalError(terminal);
+          if (battery.isPowerSaveMode) {
+            const terminal = localTerminalError("POWER_SAVE_MODE");
+            pushLog("error", terminal.message);
+            setTerminalError(terminal);
 
-          return;
+            return;
+          }
+          if (battery.level > 0 && battery.level < 30) {
+            const terminal = localTerminalError("BATTERY_TOO_LOW");
+            pushLog("error", terminal.message);
+            setTerminalError(terminal);
+
+            return;
+          }
         }
-        if (battery.level > 0 && battery.level < 30) {
-          const terminal = localTerminalError("BATTERY_TOO_LOW");
-          pushLog("error", terminal.message);
-          setTerminalError(terminal);
-
-          return;
-        }
+      } catch (error: unknown) {
+        if (!isCurrentAttempt(generation, attempt)) return;
+        pushLog("warning", "无法确认设备状态，将继续同步");
+        console.warn("Get battery status failed, continuing sync:", error);
       }
-    } catch (error: unknown) {
-      if (!isCurrentAttempt(generation, attempt)) return;
+    } else {
       pushLog("warning", "无法确认设备状态，将继续同步");
-      console.warn("Get battery status failed, continuing sync:", error);
     }
 
     if (!isCurrentAttempt(generation, attempt)) return;

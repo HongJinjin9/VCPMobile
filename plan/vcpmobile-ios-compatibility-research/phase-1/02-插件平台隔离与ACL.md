@@ -1,8 +1,8 @@
 # Phase 1 · 插件平台隔离与 ACL
 
-> 2026-10-08，基于 Phase 0 提交 `489b3341` 后的生产源码实施。本文只记录插件边界与窗口授权；阶段总验收另行汇总。未执行 Apple 构建，不表示 Swift adapter 已存在。
+> 历史实施：2026-10-08，基线 `489b3341`。原表格和验证说明当时的 cfg/ACL 修改；2026-10-09 已接 Swift、删除能力查询，并将新获批原生项改为 `not_implemented`。当前命令结果见 [主线 02](../02-平台能力与41条命令兼容矩阵.md)，不从下表恢复旧延期或逐层门禁。
 
-## 1. 实际入口与修改范围
+## 1. 原阶段入口与修改范围
 
 入口是 `src-tauri/plugins/vcp-mobile/src/lib.rs::init` 的 42 条公开命令；业务 Rust 还直接调用 `system`、`stream` 和 `cli`，因此仅修改 capability JSON 不足以隔离平台。
 
@@ -17,11 +17,11 @@
 
 `events.rs`、Android 生命周期 producer 与其测试由本阶段生命周期子项统一修改，不由本子项重复改变。原有六个 permission 文件的工作树内容完整保留。
 
-## 2. 42 条公开命令的当前 iOS 结果
+## 2. Phase 1 的 42 条命令结果快照
 
-`待实现` 对应 `not_implemented`；`不支持` 对应 `unsupported`，表示当前产品范围，而非判断系统永远无法提供这类能力。表中“Android grant”是前端窗口授权，不代表内部 Rust 能力存在与否。
+下表保留 Phase 1 时 `not_implemented/unsupported` 的分类，方便对应原验证记录；不是当前实现矩阵或产品范围。Android grant 表示当时的前端窗口授权，不代表内部 Rust 能力存在与否。
 
-| 公开命令 | iOS 当前结果 | Android grant / 真实消费者 |
+| 公开命令 | iOS 当时结果 | Android grant / 当时消费者 |
 |---|---|---|
 | `set_keep_screen_on` | 待实现 | 无前端消费者，不授予 |
 | `clear_keep_screen_on` | 待实现 | 无前端消费者，不授予 |
@@ -66,11 +66,11 @@
 | `acquire_ota_keepalive` | 不支持 | Rust updater owner，不授予 |
 | `release_ota_keepalive` | 不支持 | Rust updater owner，不授予 |
 
-11 条命令涉及待实现能力（其中 `open_file_native` 按意图再分支），其余 31 条属于当前 iOS 不支持的命令面。类型化的平台能力由 app 层提供，不要求 UI 调用失败命令来探测平台；表中 22 条 Android native grants 都保留真实前端调用链。
+当时为 11 条待实现、31 条不支持，另有 `open_file_native` share 子动作；该计数不可描述当前结果。统一平台能力查询已被同步 OS 身份替代，22 条 Android grants 的实际消费仍按生产代码维护。
 
-`fileExport` 保留既定 Files exporter 实施目标，当前 `save_to_downloads` 返回 `not_implemented`；Phase 4 需将大 Base64 改为有预算的 URL/ticket 交接，不因保留目标而承诺沿用当前传输契约。`networkStatus` 对应现有完整遥测 getter，在 iOS 为不支持；Phase 2 生命周期网络 Channel 独立表达网络变化，不与该遥测开关混同。
+2026-10-09：网络/CPU thermal/GPU、传感器、相册两个接口、分享导入/导出子动作、原生剪贴板、通知发送与 pending notification 均按新批准方向返回 `not_implemented`，尚未真正接入。Files exporter 与完整遥测分别归 Phase 4/3；网络 Channel 已存在，仍不表示服务器可达或完整遥测成功。
 
-公开命令以外，`set_keepalive_mode` 是 app 注册的 Android 保活命令，内部入口也明确拒绝 iOS；`request_overlay_permission` / `toggle_floating_ball` 仍未注册，不通过本次整改恢复归档助手。传感器、原生剪贴板、通知内部函数及 CLI 桥同样具有 iOS 错误分支。生命周期网络通知与完整 telemetry status 不是同一个契约，后续 Channel 接入不受本表中遥测延期的影响。
+公开命令以外，Android keepalive/CLI 和归档悬浮助手不因新审批自动获得 iOS 实现；内部接口继续遵守实际编译和资源边界。完整 Distributed 现已批准适配，不能再以旧遥测延期排除整个节点。
 
 ## 3. 窗口与平台授权
 
@@ -93,7 +93,7 @@ Android `close` 有实际消费者：`App.vue` 根部双击返回在 `move_task_
 
 因此“portal 没有 plugin grants”不能单独推出“portal 不能执行所有 app commands”。本阶段 app 集成在 `commands.rs` 中央分发处另行收口到 `main`，保留所有共享命令和一次 worker offload。该门禁的最终实现与验证由阶段总验收记录；本文不会用 capability JSON 代替它。
 
-## 4. Host 与编译语义审查
+## 4. Phase 1 的 Host 与编译语义审查
 
 - 固定磁盘/电量、模拟传感器、权限全真等旧结果仅保留在 `not(any(target_os = "android", target_os = "ios"))` 分支；它们是开发 fixture，不是产品状态。host 的平台能力报告不得把它们声明为真实 native 支持。
 - Android 依赖继续由 Cargo 的 Android target 区段控制，JNI 与 `mobile_plugin_handle` 的使用仍受 Android cfg 约束。没有用运行时布尔值代替这层编译隔离。
@@ -102,7 +102,7 @@ Android `close` 有实际消费者：`App.vue` 根部双击返回在 `move_task_
 - `open_file_native` 保留现有 action 参数校验，并把 `share` 与默认 `view` 分别判定；不把文件预览授权扩大为分享、导出或 APK 安装能力。
 - iOS 尚未取得原生租约、选择文件或建立临时资源，所以错误返回不产生取消/清理 owner。接入 Swift 时必须沿已有 owner 补回成功和释放路径，不能只改 capability 为可用。
 
-## 5. 已执行验证与阶段交接
+## 5. 原执行验证与当前交接
 
 2026-10-08 执行结果：
 
@@ -111,4 +111,4 @@ Android `close` 有实际消费者：`App.vue` 根部双击返回在 `move_task_
 3. 22 条 Android native grants 与 Phase 0 真实前端消费者集合完全一致，全部 permission identifier 可解析；另外保留 Android 返回失败路径使用的 core close 权限。所有 capability 只匹配 `main`，iOS/host 没有本插件 native grants。
 4. 插件构建前后六个原有 dirty permission 文件 SHA-256 完全一致；`git diff --check` 对本子项修改通过。未编辑/重生成权限集合，没有新增或删除公开命令。
 
-阶段总集成仍需完成 `pnpm check`、app 窗口门禁与能力消费验证。Phase 2 接 Swift registration/Channel 时保留本次 cfg 隔离；Phase 3/4 接入真实电量/文件/staging，Phase 5 接入 operation lease 时才增补相应 iOS grants。权限声明、成功结果、取消与资源释放必须随实际消费者一起完成。
+原阶段总集成和检查已完成，见 07；后续 Phase 2 已接 Swift registration/Channel 并移除统一能力表。下一步按 Phase 3 的共同权限/通知/设备、Phase 4 的媒体分享和 Phase 5 的后台专项接入；只有实际前端调用需要时增补 iOS grants，内部 Rust→Swift 接口不为形式对称开放。权限、结果、取消和资源释放按实际操作闭合。

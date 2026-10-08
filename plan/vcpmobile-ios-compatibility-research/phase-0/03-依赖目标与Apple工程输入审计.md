@@ -2,6 +2,8 @@
 
 > 审计日期：2026-10-08。基线 HEAD：`4c6e25bba72a9883f4c5270c1daf2493850bd04e`。输入为本次工作树中的生产配置、锁文件、已安装 crate 源码与锁定 CLI tag。本文是源码分析和工程输入清单，不是 Apple 编译结果。
 
+2026-10-09 校准：第 1–6 节保留上述依赖版本和源码推导，**不作为当前版本、未完成状态或仍需从零实施的任务表**。当前 Tauri 为 2.12.1、tao 0.37.1，Swift/Channel、minimum 15.0 和 G1 输入已落地；活动 DEP 项见第 7 节，最新工程证据见 [Phase 2](../phase-2/README.md)。本次没有改写原 cargo tree 结果或运行新构建。
+
 ## 1. 本阶段结论与证据范围
 
 - Rust、Swift 插件装配、主要原生依赖和 CLI 工程路径已有可定位的施工依据，可以进入 Phase 1。
@@ -22,7 +24,7 @@ cargo tree --locked --offline --target aarch64-apple-ios -i swift-rs --depth 2
 
 这些命令只确认离线依赖解析/feature 输入；没有执行 build script、C/Swift 编译或 Apple 链接。下文 `crate@version/path` 是 Cargo registry 源码相对定位，避免将本机缓存绝对路径作为后续执行依赖。`CLI/…` 对应上游 `tauri-cli-v2.11.4/crates/tauri-cli/…`。
 
-## 2. 固定版本与目标输入
+## 2. Phase 0 固定版本与目标输入
 
 | 对象 | 本次确认值 | 事实源与后续使用方式 |
 |---|---|---|
@@ -37,7 +39,7 @@ cargo tree --locked --offline --target aarch64-apple-ios -i swift-rs --depth 2
 | app Rust 产物 | `vcp_mobile_lib`，`staticlib/cdylib/rlib` | `src-tauri/Cargo.toml`；Apple 工程消费 staticlib |
 | 插件 Rust package | `tauri-plugin-vcp-mobile`，`links` 同名 | 插件 `Cargo.toml`；Swift product 必须匹配传给 linker 的名字 |
 
-当前 `src-tauri/build.rs` 的 Windows manifest 参数同时检查 `CARGO_CFG_TARGET_OS=windows` 与 `CARGO_CFG_TARGET_ENV=msvc`，不会按 host 系统误注入 iOS。插件 `build.rs` 目前仅有 `.android_path("android")`；插件 state、handle 和初始化只在 Android 存在，iOS 仍会进入 `not(android)` 的 host 分支。Phase 1/2 必须显式拆分，不能把 host 检查通过理解为已接入 Apple。
+在 Phase 0 基线上，app build 的 Windows manifest 已按目标 OS/env 判断，但插件只有 `android_path`、iOS 会落入 host。该缺口后来由 Phase 1/2 修正：现有 `ios_path`、真实 iOS PluginHandle 与 Swift binding 已接通。保留原版本表是为了追溯发现，不再要求重复建立插件或能力表。
 
 ## 3. Swift 注册、ABI 与线程边界
 
@@ -54,7 +56,7 @@ cargo tree --locked --offline --target aarch64-apple-ios -i swift-rs --depth 2
 | DTO/Channel | `Invoke.swift::parseArgs/resolve/reject`；`Channel.swift` 解码 `__CHANNEL__:<id>`，支持 Encodable send | Phase 1 先固定 DTO/CodingKeys/错误；Phase 2 注册时回放 snapshot，持有同一有序事件源 |
 | 取消风险 | `src/plugin/mobile.rs::run_mobile_plugin_async` 回调 `send(response).unwrap()`，丢弃接收 future 后迟到回调可触发 panic | Phase 2 桥接任务独立接收最终响应，业务取消按 generation 丢弃结果；原生必须形成有界终态，避免无限保活任务 |
 
-**SwiftPM 锁定缺口**：`tauri@2.11.5/mobile/ios-api/Package.swift` 的 SwiftRs dependency 为 `from: "1.0.0"`。Rust `swift-rs 1.0.7` 不能证明 Swift 包也解析到 1.0.7；`swift-rs` 构建器执行 `swift build`，未显式提供只用既有 resolution 的开关。Phase 2 应记录实际 SwiftPM resolved revision、制定可重复的 resolution 输入并让 G1 保存；不要把 `.tauri` 中临时生成的 `Package.resolved` 当作已受版本管理的锁。
+**历史 SwiftPM 锁定研究**：`tauri@2.11.5/mobile/ios-api/Package.swift` 的 SwiftRs dependency 为 `from: "1.0.0"`，Rust lock 不能确定 Swift 包解析结果。Phase 2 曾增加集中 resolution 控制，后已按用户要求移除；当前直接使用各 Swift root 正常的 manifest/原有 lock 解析，不拦截 `swift` 或预置 registry lock。若 G1 出现具体解析/链接错误，再依据真实输出处理。
 
 ## 4. cfg、features、C/FFI 与原生链接输入
 
@@ -89,7 +91,7 @@ cargo tree --locked --offline --target aarch64-apple-ios -i swift-rs --depth 2
 | Scene 已存在 | `tao@0.35.3/src/platform_impl/ios/scene.rs::TaoSceneDelegate` 已实现；后台/回前台两个 callback 当前为空 | 不能写成“框架完全没有 Scene”；业务 native Channel 仍需自己的事实生产者 |
 | 单 Scene 装配缺口 | `scene.rs::multiple_scenes_enabled` 读 `UIApplicationSupportsMultipleScenes`；`view.rs` 仅在 true 时注册 `application:configurationForConnectingSceneSession:options:`，`app_state.rs::did_finish_launching` 也按该函数分流 | D5 单 Scene 不等于把值写 false 后接入自动完成。Phase 2 对首窗口创建、Scene 连接和插件 attach 做分支审计，选择最小修正或经对比的框架版本；不得擅自把产品改成多窗口 |
 
-15.0 是本阶段明确的工程选择。G1 负责实际 toolchain/SDK 下的编译和链接；若某个具体依赖/API 的声明要求更高，定位该 API、给 availability/fallback 或版本调整方案，更新这一行及消费者。无需等待 G1 才能开始 capability/cfg/DTO 工作。
+15.0 是本阶段选定、后续已写入配置的工程输入。G1 负责实际 toolchain/SDK 下的编译和链接；新增 API 按具体 availability/fallback 处理。独立源码任务不必等待 G1，也不再以建立 capability 表为前置条件。
 
 ## 6. Apple 模板、资源与签名输入归属
 
@@ -115,7 +117,7 @@ CLI build 按顺序合并生成 Info.plist、版本值、根 `Info.plist`、`Inf
 
 **G1/G2 容易漏掉的前置项**：同一 `build.rs::run` 在非 `--open` 时调用 `ensure_ios_runtime_installed()`；`ios/mod.rs` 通过 `xcrun simctl list runtimes --json` 检查 iOS runtime 名称。因此 device archive 也要求 runner 已安装 iOS runtime。这是锁定 CLI 的预检查依赖，不增加固定 Simulator 旅程。Phase 2 工程准备记录 runner 库存，G1/G2 再核对实际安装状态。[CLI iOS 环境预检查](https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.11.4/crates/tauri-cli/src/mobile/ios/mod.rs)。
 
-本轮 ignore 应精确覆盖：
+当时已落实的 ignore 规则包括：
 
 ```gitignore
 /src-tauri/gen/apple/
@@ -130,20 +132,20 @@ CLI build 按顺序合并生成 Info.plist、版本值、根 `Info.plist`、`Inf
 
 保留配置源、Swift 源、plist、xcprivacy、entitlements 和受控 resolution 输入可追踪；不使用 `*.plist`、`*.swift`、`*.entitlements` 之类宽泛规则。最终 Bundle ID、task identifier 前缀及 entitlement 改写仍按 D13 由 Phase 6 打包和用户签名说明联动。
 
-## 7. 具体后续任务与完成判据
+## 7. 2026-10-09 DEP 状态与后续任务
 
 | ID | 状态与具体问题 | 实施 owner / 阶段 | 闭环证据 |
 |---|---|---|---|
-| DEP-01 | 已定位：iOS 落入 host fallback，插件缺 Swift handle | capability/cfg / Phase 1；plugin / Phase 2 | iOS/Android/host 分支和每个调用结果一致 |
-| DEP-02 | 已确定：product 保留连字符、导出符号用下划线 | Swift package/FFI / Phase 2 | product、静态库名、`init_plugin_vcp_mobile`、binding/注册四项对应；G1 符号/链接 |
-| DEP-03 | 已定位：SwiftPM SwiftRs 未由 Cargo.lock 锁定 | 工程生成 / Phase 2 | resolution 输入、resolved revision 与 G1 日志对应 |
-| DEP-04 | 已定位：单 Scene 目标与 tao multiple-scenes gate 耦合 | framework 接入 / Phase 2 | 首窗口/Scene/attach 调用链及最小修正；G1 工程检查 |
-| DEP-05 | 已定位：取消 native future 可触发上游 send unwrap | native bridge / Phase 2 | bridge task 最终接收、generation 丢弃和资源回收分支 |
-| DEP-06 | 已确定输入：15.0，生产配置尚待 Phase 2 写入 | Apple build / Phase 2 | Tauri 配置、环境、Swift manifest 与 G1 最低系统输入一致 |
+| DEP-01 | 已修正：iOS/host 分支与真实 Swift handle 分开 | Phase 1/2 已接入 | 后续 native 函数按所属平台实现，不恢复 host 假值或统一能力表 |
+| DEP-02 | product/binding/初始化符号已对应 | Swift package/FFI / G1 | 尚需实际 Apple 符号/链接结果 |
+| DEP-03 | 已撤除额外集中 resolution 控制，使用正常 SwiftPM 解析 | 工程生成 / G1 | 依据实际解析/编译日志诊断，不宣称各 root 被脚本统一到同一 revision |
+| DEP-04 | 已迁至 tao 0.37.1 并完成单 Scene 源码修正 | framework / Phase 2、G1 | 保留首窗口/重连 owner；实际 Apple 工程结果待执行 |
+| DEP-05 | 注册 receiver 已独立保活，仅一个在途槽位；能力查询已删除 | native bridge / Phase 2 | 后续任务继续保留最终回调接收和真实资源释放，不重复引入第二查询链 |
+| DEP-06 | 15.0 已写入 Tauri/Swift/G1 输入 | Apple build / G1 | 实际最低系统编译核验未取得 |
 | DEP-07 | 已确定 feature：SQLite extension 编入；无已找到业务调用 | persistence / Phase 3 | 不新增动态扩展入口；SQLite temp/锁/容量路径明确 |
-| DEP-08 | 已定位：zstd/sqlite pkg-config 覆盖条件不同 | 构建环境 / Phase 2/6 | 三个原生库的真实 flags、SDK 与静态链接输入 |
-| DEP-09 | 已定位：device archive 也有 runtime 预检查 | Actions 输入 / Phase 2/G1/G2 | 固定 runner/Xcode/SDK/runtime 库存；不触发额外常规测试体系 |
-| DEP-10 | 尚需实施：plist/Scene/privacy/AppIcon overlay 可重复性 | 工程生成 / Phase 2 | 干净生成树可重放，源文件和最终 bundle 检查对应 |
-| DEP-11 | 尚需细化：最终选用的 Files/PHPicker/26 API availability | Swift adapter / Phase 4/5 | 每个实际 API 声明、最低版本、旧版本结果与错误分支 |
+| DEP-08 | zstd/sqlite 环境覆盖规则不同，构建输入须继续受控 | 构建环境 / G1/G2 | 三个原生库的真实 flags、SDK 与静态链接结果 |
+| DEP-09 | G1 候选 runner/Xcode/SDK 已固定；尚无执行记录 | Actions 输入 / G1/G2 | 按当前 CLI 核对实际 runtime 库存，不增加常驻 Simulator 体系 |
+| DEP-10 | plist/Scene/privacy/AppIcon overlay 已可重放 | 工程生成 / G1 | 源码检查保留，实际 archive/bundle 装配待核验 |
+| DEP-11 | 新批准权限/通知/设备、媒体分享和后台 API 尚需逐项细化 | Swift adapter / Phase 3/4/5 | 按当前部署下限核对实际 API、部分字段/取消结果；不恢复已覆盖的旧延期 |
 
-本表中“尚需实施”均是有明确接入位置的后续任务。Phase 0 的依赖审计以完成输入定位和任务交接为完成条件；Apple 产物验证在已约定的 G1/G2 取得，并按具体诊断回到上述 owner 修复。
+Phase 0 的历史完成结论不等于所有 DEP 后续实现已完成；本表只更新当前活动问题。Apple 产物验证仍在 G1/G2 取得，具体诊断回到实际 owner 修复。

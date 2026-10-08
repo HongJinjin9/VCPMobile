@@ -3,18 +3,25 @@ import { ref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import SettingsActionWithStatus from '../../../components/settings/SettingsActionWithStatus.vue';
 import { useOverlayStore } from '../../../core/stores/overlay';
-import { usePlatformStore } from '../../../core/stores/platform';
+import { isAndroid, isIOS } from '../../../core/utils/platform';
 
 
 const overlayStore = useOverlayStore();
-const platformStore = usePlatformStore();
 
-const cacheStatus = ref<{ type: 'success' | 'error' | 'loading' | null; message: string }>({ type: null, message: '' });
+const cacheStatus = ref<{ type: 'success' | 'error' | 'loading' | 'info' | null; message: string }>({ type: null, message: '' });
 
 const clearSystemCache = async () => {
+  if (!isAndroid) {
+    cacheStatus.value = {
+      type: 'info',
+      message: isIOS
+        ? '当前 iOS 版本尚未提供 WebKit 缓存清理。预渲染缓存可通过下方入口刷新。'
+        : '当前预览环境不提供原生 WebView 缓存清理。',
+    };
+    return;
+  }
   cacheStatus.value = { type: 'loading', message: '正在清理 WebView HTTP 缓存...' };
   try {
-    platformStore.require('webviewCache');
     const result = await invoke<string>('clear_webview_cache');
     cacheStatus.value = { type: 'success', message: result };
     setTimeout(() => { cacheStatus.value = { type: null, message: '' }; }, 5000);
@@ -32,13 +39,13 @@ const openRebuildSession = () => {
 
 <template>
   <div class="space-y-6">
-    <div v-if="platformStore.isImplemented('webviewCache')">
+    <div>
       <SettingsActionWithStatus
         title="清理 WebView 缓存"
-        description="清除 WebView HTTP 缓存（解决磁盘空间异常占用）"
+        :description="isAndroid ? '清除 WebView HTTP 缓存（解决磁盘空间异常占用）' : isIOS ? 'WebKit 浏览缓存清理尚未接入' : '原生 WebView 缓存清理需在移动端使用'"
         button-variant="primary"
         button-size="sm"
-        button-label="立即清理"
+        :button-label="isAndroid ? '立即清理' : '查看说明'"
         :button-loading="cacheStatus.type === 'loading'"
         :status-type="cacheStatus.type"
         :status-message="cacheStatus.message"

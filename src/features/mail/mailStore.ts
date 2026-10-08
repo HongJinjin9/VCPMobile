@@ -12,7 +12,7 @@ import { computed, ref, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { useAppLifecycleStore } from '../../core/stores/appLifecycle';
 import { useNotificationStore } from '../../core/stores/notification';
-import { usePlatformStore } from '../../core/stores/platform';
+import { isAndroid, isIOS } from '../../core/utils/platform';
 import { saveToDownloads } from '../../../src-tauri/plugins/vcp-mobile/guest-js';
 import {
   addressingOf,
@@ -452,8 +452,11 @@ export const useMailStore = defineStore('mail', () => {
   ): Promise<void> {
     const box = selectedMailbox.value;
     if (!box) return;
+    if (!isAndroid) {
+      toast('info', isIOS ? '当前 iOS 版本尚未接入附件文件导出' : '当前预览环境不提供原生附件文件导出');
+      return;
+    }
     try {
-      usePlatformStore().require('fileExport');
       const payload = await invoke<Record<string, unknown>>('mail_attachment', {
         mailId,
         partId,

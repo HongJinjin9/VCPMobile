@@ -9,7 +9,7 @@ import { useChatSessionStore } from './chatSessionStore';
 import { useChatHistoryStore } from './chatHistoryStore';
 import { useTopicStore } from './topicListManager';
 import { useAvatarStore } from './avatar';
-import { usePlatformStore } from './platform';
+import { isAndroid } from '../utils/platform';
 import { selectLatestLifecycleSnapshot, type LifecycleSnapshotDto } from '../types/lifecycle';
 import type {
   ListenerPermissionDto,
@@ -66,7 +66,6 @@ export const useAppLifecycleStore = defineStore('appLifecycle', () => {
   const notificationStore = useNotificationStore();
   const { processPayload } = useNotificationProcessor();
   const avatarStore = useAvatarStore();
-  const platformStore = usePlatformStore();
 
   let bootstrapPromise: Promise<void> | null = null;
   let coreReadyUnlisten: (() => void) | null = null;
@@ -348,13 +347,9 @@ export const useAppLifecycleStore = defineStore('appLifecycle', () => {
         errorMsg.value = null;
         hasBootstrapped.value = false;
 
-        setState('BOOTING', '读取平台能力');
-        updatePhaseLabel('正在读取平台能力...');
-        await platformStore.load(force);
-
-        // --- Android 权限门禁：通知、电池优化豁免与通知监听是常驻中继节点的保活核心能力，
-        // 缺失时先进入引导页；存储等非核心权限保持按需（feature-triggered）申请 ---
-        if (platformStore.isImplemented('androidPermissionGate')) {
+        // 当前已接入的启动权限项目来自 Android 原生接口；缺失时进入共享引导页。
+        // iOS 尚无已接入的启动权限项目，直接继续，不借用 Android 查询或容量门槛。
+        if (isAndroid) {
           try {
             const pStatus = await invoke<PermissionStatusDto>('plugin:vcp-mobile|check_all_permissions');
             const listenerRes = await invoke<ListenerPermissionDto>('plugin:vcp-mobile|check_notification_listener_permission');

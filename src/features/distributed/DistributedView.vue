@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { PermissionStatusDto } from "../../core/types/native";
 import { useSettingsStore } from "../../core/stores/settings";
 import { useNotificationStore } from "../../core/stores/notification";
-import { usePlatformStore } from "../../core/stores/platform";
+import { isAndroid, isIOS } from "../../core/utils/platform";
 import { useDistributed } from "./composables/useDistributed";
 import SlidePage from "../../components/ui/SlidePage.vue";
 
@@ -39,6 +39,18 @@ const searchQuery = ref("");
 const deviceName = ref("VCPMobile");
 const wsUrl = ref("");
 const vcpKey = ref("");
+const connectionSettingsLoading = ref(false);
+const connectionSettingsReady = ref(false);
+const connectionSettingsError = ref("");
+const connectionSaving = ref(false);
+const connectionFieldsDisabled = computed(() =>
+  !connectionSettingsReady.value || connectionSettingsLoading.value ||
+  connectionSaving.value || status.value.state !== "disconnected",
+);
+const canSaveConnection = computed(() =>
+  props.isOpen && !connectionFieldsDisabled.value &&
+  (!isAndroid || Boolean(wsUrl.value && vcpKey.value)),
+);
 
 // Interface types
 interface PluginItem {
@@ -274,7 +286,7 @@ const retryToolCatalog = () => {
   void loadPluginsMetadata(viewGeneration);
 };
 
-const ensureToolSystemPermission = async (plugin: PluginItem): Promise<boolean> => {
+const ensureAndroidToolPermission = async (plugin: PluginItem): Promise<boolean> => {
   let requiredAlias: "location" | "notification" | null = null;
   if (plugin.id === "MobileLocation") requiredAlias = "location";
   else if (plugin.id === "MobileNotification") requiredAlias = "notification";
@@ -341,7 +353,7 @@ const toggleToolEnabled = async (plugin: PluginItem) => {
 
   let mutationSucceeded = false;
   try {
-    if (targetState && !(await ensureToolSystemPermission(plugin))) return;
+    if (targetState && isAndroid && !(await ensureAndroidToolPermission(plugin))) return;
     if (!ownsAuthorizationMutation(owner) || !isCurrentView(owner.viewGeneration)) return;
 
     await invoke("update_enabled_tools", {
@@ -419,33 +431,55 @@ const selectTab = (pluginId: string, index: number) => {
 
 // Loading settings from main settings store
 const loadSettings = async (view = viewGeneration) => {
+  if (!isCurrentView(view)) return;
+  connectionSettingsLoading.value = true;
+  connectionSettingsReady.value = false;
+  connectionSettingsError.value = "";
   try {
     await settingsStore.fetchSettings();
     if (!isCurrentView(view)) return;
-    if (settingsStore.settings) {
-      wsUrl.value = settingsStore.settings.distributedWsUrl || "";
-      vcpKey.value = settingsStore.settings.distributedVcpKey || "";
-      deviceName.value = settingsStore.settings.distributedDeviceName ?? "VCPMobile";
-    }
+    const settings = settingsStore.settings;
+    if (!settings) throw new Error("连接配置为空");
+    wsUrl.value = settings.distributedWsUrl || "";
+    vcpKey.value = settings.distributedVcpKey || "";
+    deviceName.value = settings.distributedDeviceName ?? "VCPMobile";
+    connectionSettingsReady.value = true;
   } catch (e) {
     console.error("[DistributedView] Failed to load settings:", e);
+    if (isCurrentView(view)) connectionSettingsError.value = "连接配置加载失败，请重试。";
+  } finally {
+    if (isCurrentView(view)) connectionSettingsLoading.value = false;
   }
 };
 
+const retryConnectionSettings = () => {
+  if (connectionSettingsLoading.value || connectionSaving.value) return;
+  void loadSettings(viewGeneration);
+};
+
 const handleConnect = async () => {
-  if (!wsUrl.value || !vcpKey.value) return;
+  if (!canSaveConnection.value) return;
+  const view = viewGeneration;
+  connectionSaving.value = true;
   try {
-    if (settingsStore.settings) {
-      const updates = {
-        distributedWsUrl: wsUrl.value,
-        distributedVcpKey: vcpKey.value,
-        distributedDeviceName: deviceName.value,
-        distributedEnabled: true
-      };
-      await settingsStore.updateSettings(updates);
-    }
+    await settingsStore.updateSettings({
+      distributedWsUrl: wsUrl.value,
+      distributedVcpKey: vcpKey.value,
+      distributedDeviceName: deviceName.value,
+      ...(isAndroid ? { distributedEnabled: true } : {}),
+    });
   } catch (e: any) {
     console.error("[DistributedView] Connection start failed:", e);
+    if (isCurrentView(view)) {
+      notificationStore.addNotification({
+        type: "error",
+        title: isAndroid ? "连接设置保存失败" : "分布式配置保存失败",
+        message: String(e),
+        toastOnly: true,
+      });
+    }
+  } finally {
+    connectionSaving.value = false;
   }
 };
 
@@ -491,6 +525,17 @@ const togglePluginDetails = (plugin: PluginItem) => {
 // Reading a sample is intentionally separate from catalog browsing. Some OneShot tools have
 // external side effects, so expanding a row must never execute a tool.
 const readPluginSample = async (plugin: PluginItem) => {
+  if (!isAndroid) {
+    notificationStore.addNotification({
+      type: "info",
+      title: "设备工具尚未适配",
+      message: isIOS
+        ? "当前 iOS 版本尚未接入设备工具执行，可浏览目录并保存工具授权配置。"
+        : "设备工具执行目前仅在 Android 客户端可用。",
+      toastOnly: true,
+    });
+    return;
+  }
   if (
     plugin.type !== "streaming" ||
     !plugin.enabled ||
@@ -539,23 +584,46 @@ const readPluginSample = async (plugin: PluginItem) => {
 const isRootGranted = ref<boolean | null>(null);
 let rootCheckTimer: ReturnType<typeof setTimeout> | null = null;
 
+const explainRootSupport = () => {
+  notificationStore.addNotification({
+    type: "info",
+    title: "Root 为 Android 专属功能",
+    message: isIOS
+      ? "iOS 不提供此处的 Root 检测、命令执行或授权管理器，无需寻找对应权限开关。"
+      : "请在 Android 客户端使用 Root 检测和授权管理器。",
+    toastOnly: true,
+  });
+};
+
 const checkRootState = async () => {
+  if (!isAndroid) {
+    explainRootSupport();
+    return;
+  }
   console.log("[DistributedView] checkRootState checking system root access...");
   try {
-    usePlatformStore().require('rootAccess');
     const res = await checkRootAccess();
     console.log("[DistributedView] checkRootState result:", JSON.stringify(res));
     isRootGranted.value = res.isRoot;
   } catch (e) {
     console.error("[DistributedView] Failed to check root access:", e);
-    isRootGranted.value = false;
+    isRootGranted.value = null;
+    notificationStore.addNotification({
+      type: "error",
+      title: "无法确认 Root 状态",
+      message: String(e),
+      toastOnly: true,
+    });
   }
 };
 
 const handleLaunchRootManager = async () => {
+  if (!isAndroid) {
+    explainRootSupport();
+    return;
+  }
   console.log("[DistributedView] handleLaunchRootManager triggered, attempting JNI redirect...");
   try {
-    usePlatformStore().require('rootAccess');
     const res = await launchRootManager();
     console.log("[DistributedView] launchRootManager JNI result:", JSON.stringify(res));
     if (res.success) {
@@ -609,7 +677,6 @@ const filteredPlaceholders = computed(() => {
 });
 
 const openView = () => {
-  if (!usePlatformStore().isImplemented('distributed')) return;
   const generation = ++viewGeneration;
   activate();
   void loadSettings(generation);
@@ -621,6 +688,9 @@ const openView = () => {
 const closeView = () => {
   viewGeneration += 1;
   scanGeneration += 1;
+  connectionSettingsReady.value = false;
+  connectionSettingsLoading.value = false;
+  connectionSettingsError.value = "";
   catalogLoading.value = false;
   deactivate();
   if (rootCheckTimer) {
@@ -711,6 +781,10 @@ onBeforeUnmount(() => {
       <div class="flex-1 overflow-y-auto no-rubber-band relative pb-[calc(var(--vcp-safe-bottom,48px))]">
         <!-- 1. Connection view -->
         <div v-if="activeTab === 'connection'" class="px-4 py-6 space-y-6">
+          <p v-if="!isAndroid" class="border-l-2 border-black/20 pl-3 text-xs leading-relaxed opacity-65 dark:border-white/20">
+            {{ isIOS ? '当前 iOS 版本尚未接入分布式节点运行和设备工具执行。' : '分布式节点运行目前仅在 Android 客户端可用。' }}
+            可保存连接信息和工具授权配置；保存配置不会启动节点。
+          </p>
           <!-- Connection Status Card -->
           <div class="bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 p-4 rounded-2xl flex items-center justify-between">
             <div class="flex items-center gap-3">
@@ -741,11 +815,11 @@ onBeforeUnmount(() => {
               <button
                 v-else
                 @click="handleConnect"
-                :disabled="status.state === 'connecting' || !wsUrl || !vcpKey"
+                :disabled="!canSaveConnection"
                 class="px-4 py-1.5 text-white text-xs font-bold rounded-xl active:scale-95 transition-all disabled:opacity-50"
                 style="background-color: var(--highlight-text)"
               >
-                {{ status.state === 'connecting' ? '连接中...' : '连接' }}
+                {{ connectionSaving ? '保存中...' : isAndroid ? (status.state === 'connecting' ? '连接中...' : '连接') : '保存配置' }}
               </button>
             </div>
           </div>
@@ -772,7 +846,7 @@ onBeforeUnmount(() => {
                 <div class="flex flex-col min-w-0">
                   <span class="text-xs font-bold text-primary-text truncate">超级用户 Root 状态</span>
                   <span class="text-[7px] opacity-40 font-mono uppercase tracking-wider truncate">
-                    {{ isRootGranted === true ? 'ROOT ACCESS GRANTED' : isRootGranted === false ? 'ROOT ACCESS DENIED' : 'ROOT STATUS UNCHECKED' }}
+                    {{ !isAndroid ? 'ANDROID ONLY' : isRootGranted === true ? 'ROOT ACCESS GRANTED' : isRootGranted === false ? 'ROOT ACCESS DENIED' : 'ROOT STATUS UNCHECKED' }}
                   </span>
                 </div>
               </div>
@@ -783,7 +857,7 @@ onBeforeUnmount(() => {
                   class="px-2.5 py-1 text-white text-[9px] font-bold rounded-lg active:scale-95 transition-all shrink-0"
                   style="background-color: var(--highlight-text)"
                 >
-                  检测 Root
+                  {{ isAndroid ? '检测 Root' : 'Root 说明' }}
                 </button>
                 <template v-else>
                   <button
@@ -804,11 +878,14 @@ onBeforeUnmount(() => {
               </div>
             </div>
             
-            <p v-if="isRootGranted === false" class="text-[10px] opacity-60 leading-relaxed">
+            <p v-if="!isAndroid" class="text-[10px] opacity-60 leading-relaxed">
+              Root 检测和授权管理器属于 Android 专属功能，当前平台无需寻找对应权限开关。
+            </p>
+            <p v-else-if="isRootGranted === false" class="text-[10px] opacity-60 leading-relaxed">
               * 检测到未获得 Root 权限。由于 Android 系统的 SELinux 安全沙盒机制，没有 Root 权限时，诸如 CPU/GPU 实时负载及温度等核心物理遥测指标将不可用或信息降级。请在 Magisk/KernelSU 中通过授权。
             </p>
             <p v-else-if="isRootGranted === true" class="text-[10px] opacity-60 leading-relaxed">
-              * 已成功取得系统级超级用户权限。所有底层的 sysfs / procfs 接口通道已解锁，分布式遥测数据将以最高精度输出。
+              * 已取得超级用户权限；具体遥测指标是否可读取，仍取决于设备提供的接口及本次执行结果。
             </p>
             <p v-else class="text-[10px] opacity-60 leading-relaxed">
               * 超级用户权限未检测。点击“检测 Root”将发起授权验证（可能触发系统的 Magisk/KernelSU 授权弹窗）。如果您不需要 CPU/GPU 核心占用等物理监控指标，可保持未检测状态。
@@ -818,25 +895,39 @@ onBeforeUnmount(() => {
           <!-- Configuration Fields -->
           <SettingsCard>
             <div class="space-y-4 py-1">
+              <p v-if="connectionSettingsLoading" class="text-xs opacity-60" role="status">
+                正在读取连接配置...
+              </p>
+              <div v-else-if="connectionSettingsError" class="flex items-center justify-between gap-3 text-xs">
+                <span class="text-red-500" role="alert">{{ connectionSettingsError }}</span>
+                <button
+                  type="button"
+                  class="shrink-0 rounded-md border border-black/10 px-3 py-2 disabled:opacity-40 dark:border-white/10"
+                  :disabled="connectionSaving"
+                  @click="retryConnectionSettings"
+                >
+                  重新加载
+                </button>
+              </div>
               <SettingsTextField
                 v-model="deviceName"
                 label="节点名称 / Device Name"
                 placeholder="例如 VCPMobile"
-                :disabled="status.state !== 'disconnected'"
+                :disabled="connectionFieldsDisabled"
               />
               <SettingsTextField
                 v-model="wsUrl"
                 label="WS 服务地址 / WebSocket URL"
                 placeholder="ws://192.168.x.x:port"
                 mono
-                :disabled="status.state !== 'disconnected'"
+                :disabled="connectionFieldsDisabled"
               />
               <SettingsTextField
                 v-model="vcpKey"
                 label="VCP 鉴权密钥 / VCP API Key"
                 placeholder="授权校验密钥"
                 is-secure
-                :disabled="status.state !== 'disconnected'"
+                :disabled="connectionFieldsDisabled"
               />
             </div>
           </SettingsCard>
@@ -888,7 +979,9 @@ onBeforeUnmount(() => {
           <div class="px-4 py-2.5 shrink-0 border-b border-black/5 dark:border-white/5 space-y-2">
             <div class="flex items-start justify-between gap-3">
               <p class="text-[9px] leading-relaxed opacity-55">
-                扫描结果不等于授权；新工具默认关闭，逐项开启后才会注册到分布式节点。
+                {{ isAndroid
+                  ? '扫描结果不等于授权；新工具默认关闭，逐项开启后才会注册到分布式节点。'
+                  : '此处保存工具授权偏好，不代表已取得系统权限。当前版本尚未接入此平台的工具执行。' }}
               </p>
               <button
                 type="button"
@@ -1096,11 +1189,11 @@ onBeforeUnmount(() => {
                     v-if="plugin.type === 'streaming'"
                     type="button"
                     :data-tool-read="plugin.id"
-                    :disabled="!plugin.enabled || pluginLoading[plugin.id] || authorizationMutationPending"
+                    :disabled="isAndroid && (!plugin.enabled || pluginLoading[plugin.id] || authorizationMutationPending)"
                     @click.stop="readPluginSample(plugin)"
                     class="px-2 py-1 bg-black/8 dark:bg-white/8 rounded-md flex items-center gap-1 transition-opacity text-[8px] disabled:opacity-35 disabled:cursor-not-allowed"
                   >
-                    {{ pluginLoading[plugin.id] ? '读取中…' : (plugin.enabled ? '读取样本' : '授权后可读取') }}
+                    {{ !isAndroid ? '适配说明' : pluginLoading[plugin.id] ? '读取中…' : (plugin.enabled ? '读取样本' : '授权后可读取') }}
                   </button>
                   <span v-else class="normal-case text-right text-[9px] font-normal opacity-55">
                     需由 VCP 请求明确调用
@@ -1115,13 +1208,13 @@ onBeforeUnmount(() => {
                       <line x1="12" y1="9" x2="12" y2="13"/>
                       <line x1="12" y1="17" x2="12.01" y2="17"/>
                     </svg>
-                    <span>此工具需要 Root 权限以读取实时物理遥测</span>
+                    <span>{{ isAndroid ? '此工具需要 Root 权限以读取实时物理遥测' : '此工具的 Root 读取方式仅适用于 Android' }}</span>
                   </div>
                   <button 
                     @click.stop="checkRootState"
                     class="px-2 py-0.5 bg-amber-500/20 hover:bg-amber-500/30 dark:bg-amber-400/20 dark:hover:bg-amber-400/30 text-amber-800 dark:text-amber-400 rounded active:scale-95 transition-all text-[8px] font-bold shrink-0"
                   >
-                    检测 Root
+                    {{ isAndroid ? '检测 Root' : 'Root 说明' }}
                   </button>
                 </div>
 

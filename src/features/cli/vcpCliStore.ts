@@ -1,7 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
-import { usePlatformStore } from "../../core/stores/platform";
 
 export const VCP_CLI_STATUS_COMMAND = "get_vcp_mobile_cli_status";
 export const VCP_CLI_ACTION_COMMAND = "execute_vcp_mobile_cli_action";
@@ -477,7 +476,6 @@ export const useVcpCliStore = defineStore("vcpCli", () => {
     operationId: string,
     action: VcpCliAction,
   ): Promise<VcpCliActionResponse> {
-    usePlatformStore().require('cli');
     const response = await invoke<VcpCliActionResponse>(
       VCP_CLI_ACTION_COMMAND,
       {
@@ -522,7 +520,6 @@ export const useVcpCliStore = defineStore("vcpCli", () => {
     runtimeLoading.value = true;
     runtimeError.value = null;
     try {
-      usePlatformStore().require('cli');
       const status = await invoke<VcpCliRuntimeStatus>(VCP_CLI_STATUS_COMMAND);
       if (!isCurrentView(generation)) return false;
       if (!adoptRuntimeGeneration(status.runtime_generation)) return false;
@@ -970,8 +967,6 @@ export const useVcpCliStore = defineStore("vcpCli", () => {
     skillImportBusy.value = true;
     skillImportError.value = null;
     try {
-      usePlatformStore().require('cli');
-      usePlatformStore().require('filePicker');
       const picked = await invoke<NativePickedFile | null>(
         VCP_CLI_NATIVE_PICK_FILE_COMMAND,
         { mode: "file" },
@@ -1030,7 +1025,6 @@ export const useVcpCliStore = defineStore("vcpCli", () => {
     skillImportBusy.value = true;
     skillImportError.value = null;
     try {
-      usePlatformStore().require('cli');
       await invoke(VCP_CLI_SKILL_IMPORT_COMMIT_COMMAND, {
         request: {
           operation_id: operationId,

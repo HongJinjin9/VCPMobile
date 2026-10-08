@@ -7,12 +7,10 @@ import SettingsRow from '../../../components/settings/SettingsRow.vue';
 import UpdateSection from './UpdateSection.vue';
 import { useNotificationStore } from '../../../core/stores/notification';
 import { useThemeStore } from '../../../core/stores/theme';
-import { usePlatformStore } from '../../../core/stores/platform';
 
 // 背景（WebGL 流体 + 噪点）由 SettingsView 的常驻宿主层承担，本组件只负责内容。
 
 const themeStore = useThemeStore();
-const platformStore = usePlatformStore();
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -234,7 +232,7 @@ const openFeedback = () => {
     <!-- Actions List -->
     <div class="px-4 space-y-4 relative z-10">
       <SettingsCard class="!py-1.5 shadow-2xl transition-all duration-300">
-        <UpdateSection v-if="platformStore.isImplemented('apkUpdate')" />
+        <UpdateSection />
       </SettingsCard>
 
       <SettingsCard class="shadow-2xl transition-all duration-300">

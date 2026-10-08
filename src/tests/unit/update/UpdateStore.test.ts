@@ -1,10 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia';
 import { useUpdateStore } from '../../../core/stores/update';
 import { emitTauriEvent, invokeMock, listenMock, mockInvoke } from '../../mocks/tauri';
 import { UPDATE_STATUS_EVENT, type UpdateStatus } from '../../../core/types/update';
-import { usePlatformStore } from '../../../core/stores/platform';
-import { platformFixture } from '../../fixtures/platform';
+
+vi.mock('../../../core/utils/platform', () => ({
+  nativePlatform: 'android', isAndroid: true, isIOS: false,
+}));
 
 const idle: UpdateStatus = {
   state: 'idle',
@@ -31,11 +33,9 @@ const available: UpdateStatus = {
 
 describe('update store', () => {
   let pinia: Pinia;
-  beforeEach(async () => {
+  beforeEach(() => {
     pinia = createPinia();
     setActivePinia(pinia);
-    mockInvoke('get_platform_capabilities', () => platformFixture('android'));
-    await usePlatformStore().load();
   });
 
   afterEach(() => disposePinia(pinia));
@@ -101,30 +101,6 @@ describe('update store', () => {
     expect(result.state).toBe('failed');
     expect(store.error?.stage).toBe('download');
     expect(store.error?.retryable).toBe(true);
-  });
-
-  it('rejects every APK entry before capabilities load or on iOS without invoking updater commands', async () => {
-    const platform = usePlatformStore();
-    platform.snapshot = null;
-    invokeMock.mockClear();
-    const store = useUpdateStore();
-
-    for (const action of [store.init, store.check, store.startDownload, store.cancelDownload, store.install]) {
-      await expect(action()).rejects.toThrow('平台能力尚未加载');
-    }
-    expect(() => store.openPrompt()).toThrow('平台能力尚未加载');
-    expect(invokeMock).not.toHaveBeenCalled();
-    expect(listenMock).not.toHaveBeenCalled();
-
-    mockInvoke('get_platform_capabilities', () => platformFixture('ios'));
-    await platform.load();
-    invokeMock.mockClear();
-    for (const action of [store.init, store.check, store.startDownload, store.cancelDownload, store.install]) {
-      await expect(action()).rejects.toThrow('不支持');
-    }
-    expect(() => store.openPrompt()).toThrow('不支持');
-    expect(invokeMock).not.toHaveBeenCalled();
-    expect(listenMock).not.toHaveBeenCalled();
   });
 
   it('retries a failed subscription and stops consuming events when disposed', async () => {

@@ -69,6 +69,7 @@ afterEach(() => {
 });
 
 vi.mock('@tauri-apps/api/core', () => ({
+  isTauri: () => false,
   invoke: invokeMock,
   convertFileSrc: convertFileSrcMock,
   Channel: MockChannel,

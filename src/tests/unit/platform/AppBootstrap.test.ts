@@ -2,10 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia';
 import { useAppLifecycleStore } from '../../../core/stores/appLifecycle';
 import { useNotificationStore } from '../../../core/stores/notification';
-import { usePlatformStore } from '../../../core/stores/platform';
 import { useNotificationProcessor } from '../../../core/composables/useNotificationProcessor';
-import { platformFixture } from '../../fixtures/platform';
 import { invokeMock, mockInvoke } from '../../mocks/tauri';
+
+const testPlatform = vi.hoisted(() => ({ value: null as 'android' | 'ios' | null }));
+vi.mock('../../../core/utils/platform', () => ({
+  get nativePlatform() { return testPlatform.value; },
+  get isAndroid() { return testPlatform.value === 'android'; },
+  get isIOS() { return testPlatform.value === 'ios'; },
+}));
 
 vi.mock('../../../core/stores/assistant', () => ({
   useAssistantStore: () => ({ fetchAgentsAndGroups: async () => {} }),
@@ -43,6 +48,7 @@ describe('platform-aware bootstrap', () => {
   let backgroundServiceFailures: Array<'guardian' | 'helper' | 'events'>;
 
   beforeEach(() => {
+    testPlatform.value = null;
     pinia = createPinia();
     setActivePinia(pinia);
     backgroundServiceFailures = [];
@@ -123,37 +129,20 @@ describe('platform-aware bootstrap', () => {
     expect(newStore.historyList[0].id).toBe('vcp_background_service_error_events');
   });
 
-  it('stops before native permissions on capability failure and retries the same bootstrap owner', async () => {
-    mockInvoke('get_platform_capabilities', async () => { throw new Error('bridge unavailable'); });
-    const lifecycle = useAppLifecycleStore();
-
-    await expect(lifecycle.bootstrap()).rejects.toThrow('bridge unavailable');
-    expect(lifecycle.state).toBe('ERROR');
-    expect(usePlatformStore().snapshot).toBeNull();
-    expect(invokeMock.mock.calls.map(([command]) => command)).toEqual(['get_platform_capabilities']);
-
-    mockInvoke('get_platform_capabilities', () => platformFixture('ios'));
-    await lifecycle.bootstrap(true);
-    expect(lifecycle.state).toBe('READY');
-    expect(lifecycle.errorMsg).toBeNull();
-    expect(invokeMock.mock.calls.some(([command]) => command.startsWith('plugin:vcp-mobile|'))).toBe(false);
-  });
-
   it('does not run Android permission checks or add Android warnings on iOS', async () => {
-    mockInvoke('get_platform_capabilities', () => platformFixture('ios'));
+    testPlatform.value = 'ios';
     const lifecycle = useAppLifecycleStore();
 
     await lifecycle.bootstrap();
 
     expect(lifecycle.state).toBe('READY');
-    expect(invokeMock.mock.calls.map(([command]) => command)).toEqual([
-      'get_platform_capabilities', 'get_system_snapshot',
-    ]);
+    expect(invokeMock).toHaveBeenCalledWith('get_system_snapshot');
+    expect(invokeMock.mock.calls.some(([command]) => command.startsWith('plugin:vcp-mobile|'))).toBe(false);
     expect(useNotificationStore().historyList).toHaveLength(0);
   });
 
   it('keeps the Android permission gate and rechecks native authorization before entering', async () => {
-    mockInvoke('get_platform_capabilities', () => platformFixture('android'));
+    testPlatform.value = 'android';
     mockInvoke('plugin:vcp-mobile|check_all_permissions', () => ({ notification: false, battery: true }));
     mockInvoke('plugin:vcp-mobile|check_notification_listener_permission', () => ({ enabled: true }));
     const lifecycle = useAppLifecycleStore();
@@ -161,7 +150,6 @@ describe('platform-aware bootstrap', () => {
     await lifecycle.bootstrap();
     expect(lifecycle.state).toBe('PERMISSIONS');
     expect(invokeMock.mock.calls.map(([command]) => command)).toEqual([
-      'get_platform_capabilities',
       'plugin:vcp-mobile|check_all_permissions',
       'plugin:vcp-mobile|check_notification_listener_permission',
     ]);
@@ -172,7 +160,7 @@ describe('platform-aware bootstrap', () => {
   });
 
   it('retains the Android foreground fallback with an explicit warning when its permission query fails', async () => {
-    mockInvoke('get_platform_capabilities', () => platformFixture('android'));
+    testPlatform.value = 'android';
     mockInvoke('plugin:vcp-mobile|check_all_permissions', async () => { throw new Error('permission query failed'); });
 
     await useAppLifecycleStore().bootstrap();

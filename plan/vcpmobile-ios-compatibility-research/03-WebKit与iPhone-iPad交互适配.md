@@ -1,32 +1,34 @@
 # 03. WebKit 与 iPhone/iPad 交互适配
 
-> 2026-10-07 修订：保留现有组件与状态所有者，逐入口适配 WKWebView 和 iPhone/iPad 交互。
+> 2026-10-09 修订：对照 `c46a3c48` 及当前工作树，保留现有组件与状态所有者，按最新功能审批逐入口适配。未取得 Apple 构建或 iOS 运行结果。
 
-## 2026-10-07 当前前端结论
+## 当前前端与待适配交互
 
 现有前端已具备 `viewport-fit=cover`、四边 safe-area CSS、按当前窗口宽度的单/双栏布局、语义化 overlay 层级和强渲染 fallback。适配重点是平台启动步骤、Insets 数据来源、返回与手势、输入布局和 WebKit 特性。
 
 ### 已变化的生产事实
 
-- `PermissionGate` 在 `App.vue` 的 `PERMISSIONS` 状态挂载；`appLifecycle.ts` 执行 Android 权限检查，异常路径也会产生 Android 后台权限警告。适配同时覆盖检查步骤、警告文案与组件挂载。
+- `appLifecycle.ts` 仅在 Android 启动时执行原通知/电池/通知监听检查及对应异常告知。`PermissionGate` 共用挂载和外壳，当前项目列表仅有 Android 已接入权限；iOS 暂无启动权限项，不请求 Android 命令。共同引导后续随真实权限接入补项。
 - 当前 Router 只有 `/` 重定向到 `/chat`；Settings、Agent、Task 等主要由 overlay/page stack 承载。
 - `WebGLFluidBackground` 已处理关闭停帧、context lost/restored 和 DPR 限制；仍缺 app background/visibility 与 `prefers-reduced-motion` 收口。
-- `useAutoUpdate` 在所有平台初始化，`UpdatePrompt` 无条件挂载；iOS 会查询 Android Release/APK。
-- 语音 composable、相机/相册/文件按钮、Root/Distributed/CLI 入口仍按共同组件树展示；需要按 09 的范围选择呈现。
-- 现有少量 `navigator.userAgent.includes("android")` 区分 Android/browser 路径；新增 capability 后由统一平台信息驱动。
+- 版本更新入口已保留，iOS 点击说明 App 外自签；`useAutoUpdate` 的初始化/延时检查和 `UpdatePrompt` 仍限 Android，不在 iOS 请求 APK。
+- 语音按钮在 iOS 保留，触摸开始或独立点击给出未开发说明；不启动录音计时/麦克风，触摸结束不切入语音模式。Android 语音行为保留。
+- Distributed 页面已可展示目录、连接配置和授权偏好；iOS Root 点击说明，节点运行与设备工具执行尚未接入。CLI 仍沿当前 Android 范围；不能将页面可见写成原生工具已可用。
+- 文件/图片聊天入口仍有 HTML 子路径，头像和重型附件点击有具体说明；相机、相册保存、原生打开等尚待各自 adapter。最新审批已纳入这些原生能力，不能继续列为永久隐藏或旧范围延期。
+- `src/core/utils/platform.ts` 通过 `plugin-os` 同步提供 `isAndroid/isIOS`，不依赖 UA、能力查询或启动重试；旧 `PlatformCapabilities` 和前端平台 Store 已删除。
 
-### P0：平台化启动与入口
+### 平台入口已简化，后续按真实功能接入
 
-新增一个进程级 capability owner，至少控制：
+沿现有组件和状态 owner 完成后续工作：
 
-- Android PermissionGate 与 Android 后台权限文案；
-- updater 检查、设置入口、Prompt 与 APK download；
-- Root、CLI/PTY、设备遥测、Distributed tools；
-- 语音、相机、保存相册、系统通知、incoming/outgoing share；
-- 文件 picker/export/open、剪贴板 fallback；
-- iOS 根返回语义。
+- 共同权限引导：按平台真实项目展示、请求和刷新；iOS 无 OEM 自启动、通知访问或电池豁免项目，不以假授权填满 Android 步骤；
+- 更新/Root/语音：保留已接入的说明入口与自动路径隔离，不因显示按钮而初始化原生执行；
+- 缓存：共享维护页已用运行时文案区分 WebView/WebKit，iOS 当前显示尚未接入；真正清理后才报告成功，预渲染维护继续由原 owner 处理；
+- 已批准的 incoming/outgoing share、本 App 系统通知、相机、相册、网络遥测和 Distributed：逐条连接原生操作、取消和结果，权限拒绝与未实现分开；系统通知不自动扩展为完整 APNs；
+- Files/PHPicker/export/open：原生附件仍为 P0，HTML 输入不是完成依据；iPad 原生展示需正确锚点；
+- lifecycle/网络恢复：保留 iOS 首次真实 active、native sequence/epoch 与同一恢复 owner；旧能力字段不能替代这些实时状态。
 
-所有 Feature 继续使用同一组件树，按 capability 和当前窗口宽度改变呈现。Updater 的接入点要覆盖 `useAutoUpdate` 初始化、READY 后检查、设置页手动入口、Prompt 以及 Rust download/install owner；只修改弹窗可见性会留下实际网络请求。
+所有 Feature 继续使用同一组件树，简单平台差异直接使用 `isAndroid/isIOS`，布局只按当前窗口宽度。每次改动同时追踪点击、自动启动、监听、恢复和导入配置，结果由原 owner 告知；不建立全局能力状态机、按钮策略框架或平台页面副本。U1 关于页集中功能说明仍是未批准建议，不作为本轮必做页面。
 
 ### P0：safe area 与键盘契约
 
@@ -43,14 +45,14 @@ Android vcp-keyboard-inset
 - 当前链路使用 native、Virtual Keyboard 与高度差估算，需要增加 `visualViewport` 数据源；
 - 任意 native snapshot 会把 `nativeSnapshotSeen` 永久置真，并用 inline px 覆盖 CSS `env()`；
 - 原生数值统一除以 DPR；若 Swift 上报 UIKit points，会被二次缩小；
-- native 快照需增加 source、sequence、generation、scene resize 与失效处理；
+- iOS 来源接入时核对旋转/Scene resize、迟到快照和来源释放；仅在真实多来源/乱序需求出现时补必要身份和去重字段，不建立每组件 Insets 状态；
 - Chat 使用局部 `--keyboard-offset`，其他编辑页消费方式不一致；
-- `themes.css` 顶部 safe area 为 `max(env(...), 24px)`，iOS 横屏/零顶部 inset 时需由平台策略去掉这项 Android 占位。
+- `themes.css` 顶部 safe area 为 `max(env(...), 24px)`，iOS 横屏/零顶部 inset 时需在现有归一化入口去掉这项 Android 占位。
 
 目标契约：
 
 1. safe area 默认继续由 CSS `env(safe-area-inset-*)` 提供；
-2. Insets 使用一个数据源选择 owner，字段包含 `source/unit/sequence/visible/overlapCssPx`，每次输出说明坐标空间；
+2. Insets 继续使用一个归一化 owner，明确单位、可见状态和实际遮挡；字段按生产者/消费者需要确定，不强制引入整套新的平台协议；
 3. 先算 WebKit 已经缩小的可见区域，再算业务底部还需补偿的遮挡量；用 `visualViewport.height/offsetTop` 或 Swift frame 转到同一 CSS 坐标，避免重复抬升；
 4. Android physical px 沿用 DPR 换算；UIKit points 根据 WebView 坐标和缩放转换，旋转、Scene resize、来源释放后重新计算；
 5. Chat、FullScreenEditor、Task、Agent、Mail、Forum、Diary 的输入消费方逐个核对 padding、safe bottom 和 keyboard offset；iOS 范围外的 CLI 沿用 Android 路径。
@@ -59,8 +61,8 @@ Android vcp-keyboard-inset
 
 ### P0：返回、手势与选择
 
-- `App.vue` 依次关闭顶层 modal、清当前会话，根部才执行双击 `move_task_to_back` 及失败后的 window.close；iOS 复用前两级并将根动作设为保持应用。
-- iOS 根状态只允许关闭顶层 overlay/page 或清空当前会话；到根后保持 App。
+- `App.vue` 当前已经依次关闭顶层 modal、清当前会话；只有 Android 在根部执行双击 `move_task_to_back` 及原失败 fallback。iOS 到根保持 App，这不是尚待实现的任务。
+- 后续手势改动继续复用上述返回链，不再为 iOS 建立另一份页面状态。
 - `useModalHistory` 在模块求值时安装 popstate，App 在 router ready 后补 root dummy；沿现有 owner 对 UI close、popstate、拒绝关闭推演一次消费与恢复。
 - `useSidebarSwipe` 已避让滚动、input/textarea 和 `.no-swipe`；在这些规则上增加边缘起点策略。左/右布局阈值分别为 1024/1280 CSS px，继续按当前窗口宽度工作。
 - ancestor longpress/contextmenu 会与 iOS 文本选择、Copy/Lookup/Translate 竞争；可选择内容必须让原生选择优先。
@@ -80,11 +82,11 @@ Android vcp-keyboard-inset
 
 `vite.config.ts` 当前仍只写 `chrome87`，Vitest 仍是 `happy-dom`。施工时：
 
-- deployment target 确定后，给 Vite 明确对应 Safari 语法目标；
+- 按已配置的 iOS minimum 15.0 和实际依赖，给 Vite 核对对应 Safari 语法目标；本轮同步平台身份不需要两套前端产物；
 - 逐项核对实际使用的 CSS/API availability，区分构建语法转换、运行 API 与样式 fallback；
-- fixture 覆盖 morphdom/DOM engine、KaTeX、Mermaid、raw HTML sandbox、`iframe.srcdoc`、Canvas 导出、长会话 `content-visibility`、asset protocol、字体和剪贴板；
+- 针对改动中真实不确定的输入核对 morphdom/DOM engine、KaTeX、Mermaid、raw HTML sandbox、`iframe.srcdoc`、Canvas、`content-visibility`、asset protocol、字体和剪贴板；复用已有 fixture，不把研究结论机械复制成测试；
 - WebGL 已有 active 停帧、context lost/restored 与 DPR 1.5 上限，补生命周期 visibility/reduced-motion 的停启路径；
-- Playwright 和后续 WKWebView 使用同一批输入，分别记录引擎与实际结果。
+- 当前不建设 Playwright/iOS 实机验证体系；日常以源码、必要的 host 行为检查及生成 JS/CSS 为证据，Apple 编译/链接仅通过手动 G1/G2，不能将 happy-dom 结果表述为 WKWebView 运行通过。
 
 ### 实施完成条件
 

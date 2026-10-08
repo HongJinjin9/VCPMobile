@@ -124,9 +124,7 @@ pub async fn bootstrap(app: &AppHandle) -> Result<(), String> {
     // Tool authorization is an offline policy and must be ready before any catalog read or
     // network reconciliation. Distributed being disabled must not hide persisted grants or
     // migration warnings from the plugin center.
-    if crate::vcp_modules::infra::platform::is_implemented(
-        crate::vcp_modules::infra::platform::CapabilityName::Distributed,
-    ) {
+    {
         let distributed_state = handle.state::<crate::distributed::DistributedState>();
         let tool_config_status = distributed_state
             .registry
@@ -142,9 +140,7 @@ pub async fn bootstrap(app: &AppHandle) -> Result<(), String> {
     crate::vcp_modules::boot_trace::boot_mark(&handle, "rs:tool_auth_done");
 
     // 3.6 根据设置决定是否启动分布式节点 (自动重连)
-    if crate::vcp_modules::infra::platform::is_implemented(
-        crate::vcp_modules::infra::platform::CapabilityName::Distributed,
-    ) {
+    {
         let enable_dist = settings.distributed_enabled;
         log::info!(
             "[Lifecycle] distributedEnabled={}, reconciling distributed node...",
@@ -320,9 +316,7 @@ pub async fn bootstrap(app: &AppHandle) -> Result<(), String> {
                                 );
                             }
                             #[cfg(target_os = "android")]
-                            if connected && crate::vcp_modules::infra::platform::is_implemented(
-                                crate::vcp_modules::infra::platform::CapabilityName::Distributed,
-                            ) {
+                            if connected {
                                 let app = event_handle.clone();
                                 tauri::async_runtime::spawn(async move {
                                     if let Some(state) =
@@ -413,9 +407,6 @@ pub async fn reconcile_local_server_cmd(
 
 #[tauri::command]
 pub async fn reconcile_distributed_node_cmd(app_handle: AppHandle) -> Result<bool, String> {
-    crate::vcp_modules::infra::platform::require_capability(
-        crate::vcp_modules::infra::platform::CapabilityName::Distributed,
-    )?;
     let settings_state = app_handle.state::<SettingsState>();
     let _runtime_guard = settings_state.lock_runtime_reconcile().await;
     let settings = read_settings(app_handle.clone(), app_handle.state())

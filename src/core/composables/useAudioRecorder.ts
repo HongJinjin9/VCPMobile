@@ -1,6 +1,6 @@
 import { ref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
-import { usePlatformStore } from '../stores/platform';
+import { isAndroid } from '../utils/platform';
 
 export function useAudioRecorder() {
   const isRecording = ref(false);
@@ -32,11 +32,9 @@ export function useAudioRecorder() {
 
   const startRecording = async (): Promise<void> => {
     if (isRecording.value) return;
-    const platformStore = usePlatformStore();
-    platformStore.require('voiceRecording');
 
     try {
-      if (platformStore.platform === 'android') {
+      if (isAndroid) {
         try {
           // 主动呼起原生 Android 麦克风录音权限弹窗申请
           await invoke('plugin:vcp-mobile|request_android_permission', { pType: 'microphone' });

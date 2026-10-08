@@ -6,9 +6,9 @@
 
 ## 1. 子系统定位
 
-`tauri-plugin-vcp-mobile` 实现 VCP Mobile 的 Android 原生能力，并接入 iOS Swift 能力查询与生命周期/网络 Channel。它接收 Vue 或 Rust 核心发出的设备意图，经 Rust 插件边界进入对应原生 owner，再把调用结果或原生事件送回实际消费者。iOS 其他 adapter 继续分期实施，需与 host 开发分支显式区分；非 Android fallback 不代表 iOS 可用，也不建立桌面产品能力。
+`tauri-plugin-vcp-mobile` 实现 VCP Mobile 的 Android 原生能力，并接入 iOS Swift 生命周期/网络 Channel。它接收 Vue 或 Rust 核心发出的设备意图，经 Rust 插件边界进入对应原生 owner，再把调用结果或原生事件送回实际消费者。iOS 其他 adapter 继续分期实施，需与 host 开发分支显式区分；非 Android fallback 不代表 iOS 可用，也不建立桌面产品能力。
 
-Phase 1 将 Android、iOS、host 的插件分支显式隔离：iOS 尚未接通的首期能力返回 `not_implemented`，当前范围外能力返回 `unsupported`；固定状态与无副作用成功仅保留在排除 Android/iOS 的 host 开发 fixture 中。后续 adapter 只能替换对应 iOS 分支，不能借用 host 成功结果。
+Android、iOS、host 的插件分支显式隔离。尚未接通的原生调用如有实际消费者，应返回符合当前原因的不可用结果；不为形式完整增设占位接口。固定状态与无副作用成功仅用于排除 Android/iOS 的 host 开发 fixture，不能借作 iOS 实现。
 
 ### 1.1 正常调用链
 
@@ -28,7 +28,7 @@ Rust 核心内部调用 ─> Rust 公开入口 ─┼─> PluginHandle / JNI
 | ---- | ---- |
 | `src/lib.rs` | 组合插件、注册前端可调用命令、注入 `VcpMobileState` |
 | `src/events.rs` | Rust 原生 Channel 订阅、生命周期/网络事件类型、后台服务失败通知与快照收集；真实 Events 注册失败保留至进程结束，Guardian/Helper 取走 |
-| `src/ios.rs` | 两条内部 Swift 调用的 DTO、协议校验与有界 receiver 保活；能力查询等待 5 秒，事件注册等待最终 ack，调用方超时/取消不丢原生接收端 |
+| `src/ios.rs` | 内部 Swift 事件注册、协议校验与 receiver 保活；等待最终 ack，调用方取消不丢原生接收端 |
 | `ios/Package.swift`、`ios/Sources/VcpMobilePlugin.swift` | Swift product/初始化符号、主队列 app/Scene 观察与 NWPathMonitor；不拥有业务状态 |
 | `src/screen.rs` | 经 WebView JNI 进入 `ScreenKeepOnArbiter` |
 | `src/stream.rs` | 请求独立的前台保活租约与 helper service 的 Rust 边界 |
@@ -69,7 +69,7 @@ Rust 边界变化在 `src-tauri/` 运行 `cargo check --locked -p tauri-plugin-v
 
 Swift 接入时同步核对 `ios_path`、SwiftPM product、初始化 binding、selector、DTO、Channel 与资源归属；UI 操作显式在主队列执行，领域状态仍归 Rust。Apple 编译/链接按根规范集中在手动 Actions G1/G2，日常源码审计记录具体目标分支与待办。
 
-当前 iOS 只在 Rust bootstrap 安装一次长期 Channel；Swift WebView 替换复用同一 Channel 并更换观察者 generation。锁定 Tauri 的原生 Channel 注册表没有删除入口，不能通过反复创建 Channel 实现重试。两条原生请求分别最多一个在途；能力查询调用方最多等待 5 秒，超时后底层任务仍接收最终回调，完成后可以重试查询。事件注册由 READY 后的独立订阅任务等待最终 ack，迟到 reject、解析或协议错误仍报告真实失败，不阻塞核心启动。
+当前 iOS 只在 Rust bootstrap 安装一次长期 Channel；Swift WebView 替换复用同一 Channel 并更换观察者 generation。锁定 Tauri 的原生 Channel 注册表没有删除入口，不能通过反复创建 Channel 实现重试。事件注册最多一个在途，由 READY 后的独立订阅任务等待最终 ack，迟到 reject、解析或协议错误仍报告真实失败，不阻塞核心启动。
 
 两平台真实 Events 注册失败没有进程内重试入口，由 `ServiceFailureNotices` 留存并经 `collect_service_failure_notices` 重放给新 WebView；Guardian/Helper 仍按原语义取走。当前 WebView 的一次告知由前端通知 Store 管理。真正订阅失败需完全关闭应用后重新打开；未来增加注册恢复成功路径时，必须同步调整故障留存期限。
 

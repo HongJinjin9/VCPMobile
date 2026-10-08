@@ -124,7 +124,7 @@ VCPMobile/
 - `docs/plugins/`：回答"代码是**怎么**做的"（接口签名、数据流、实现细节）
 - `UI_LAYER_ARCHITECTURE.md`：全局 UI 层级规范，与 `src/core/constants/layers.ts` + `uno.config.ts` + `src/assets/themes.css` 三重机制对应
 - `MOBILE_UI_COMPATIBILITY.md`：Android 生产边界与 iOS 实验目标、共享窗口布局、分平台 CSS/Insets 与验证边界的权威规范
-- `CROSS_PLATFORM_DEVELOPMENT.md`：Android/iOS 编译隔离、能力事实、入口呈现、权限、命令与提示的开发规范
+- `CROSS_PLATFORM_DEVELOPMENT.md`：Vue 运行时平台分支、原生编译隔离、权限与用户提示的开发规范
 
 ### 2.2 移动端原生插件（`tauri-plugin-vcp-mobile`）
 
@@ -170,7 +170,7 @@ pnpm android:debug:dev
 **以最佳认知熵把握改动尺度。** 在完整解决问题的同时，让系统的结构、职责与因果关系更清楚，为后续理解和演化减少负担。修复与重构的边界由这一目标决定：该深入时深入，该收束时收束。谨慎体现在对根因与影响的充分理解中，优秀体现在改动后的整体质量上。
 
 - **修改后的强制检查**: 任何涉及跨层或核心逻辑的变更后，必须运行 `pnpm check`。若未通过，必须先修复静态错误再继续。
-- **跨平台功能**: 涉及平台分支、能力、权限或差异化 UI/错误提示时，先读 [跨平台开发规范](docs/CROSS_PLATFORM_DEVELOPMENT.md)，沿真实调用链确定编译边界、状态 owner 与各平台结果。
+- **跨平台功能**: 涉及平台分支、原生适配、权限或差异化 UI/提示时，先读 [跨平台开发规范](docs/CROSS_PLATFORM_DEVELOPMENT.md)。Vue 默认使用统一平台入口的运行时分支；后端检查回应真实执行条件，不以假想安全风险建立重复的功能门禁。
 - **现有文件修改原则**: 对于任何已存在的文件，哪怕只改 1 行，**严禁使用全文件覆盖**，必须使用原子级、外科手术式的编辑，以防幻觉灾难。编辑方式保持精确，设计尺度由问题本身决定。
 - **Shell 安全（Windows）**:
   - 禁止使用 Unix 风格链式操作符（`&&`, `||`）。使用 `;` 分隔无关命令。

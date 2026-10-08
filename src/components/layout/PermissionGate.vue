@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { useAppLifecycleStore } from '../../core/stores/appLifecycle';
-import { usePlatformStore } from '../../core/stores/platform';
+import { isAndroid } from '../../core/utils/platform';
 import type {
   DiskSpaceDto,
   ListenerPermissionDto,
@@ -10,7 +10,18 @@ import type {
 } from '../../core/types/native';
 
 const lifecycleStore = useAppLifecycleStore();
-const platformStore = usePlatformStore();
+
+// Only list permissions backed by the current platform's native requests.
+// iOS has no startup permission items yet; it continues through the same owner.
+const permissionItems: ReadonlyArray<{
+  id: 'notification' | 'battery';
+  name: string;
+  desc: string;
+  icon: string;
+}> = isAndroid ? [
+  { id: 'notification', name: '系统通知', desc: '显示 Agent 运行状态和即时提醒', icon: 'i-heroicons-bell' },
+  { id: 'battery', name: '后台运行权限', desc: '切换到后台时保持连接不被系统中断', icon: 'i-heroicons-arrow-path' },
+] : [];
 
 const status = ref<PermissionStatusDto>({
   notification: false,
@@ -37,7 +48,7 @@ const freeDiskSpaceGB = ref(0);
 const totalDiskSpaceGB = ref(0);
 const isDiskCheckError = ref(false);
 
-const allGranted = computed(() => status.value.notification && status.value.battery);
+const allGranted = computed(() => permissionItems.every(item => status.value[item.id]));
 
 // 后台省电是否配置好 (优先自动感应电池优化白名单和无后台限制状态)
 const isPowerReady = computed(() => {
@@ -57,7 +68,6 @@ const step2Ready = computed(() => isPowerReady.value && isListenerReady.value);
 const isStorageSpaceOk = computed(() => freeDiskSpaceGB.value >= 5.0);
 
 const check = async () => {
-  if (!platformStore.isImplemented('androidPermissionGate')) return;
   try {
     const res = await invoke<PermissionStatusDto>('plugin:vcp-mobile|check_all_permissions');
     status.value = res;
@@ -74,7 +84,6 @@ const check = async () => {
 };
 
 const checkDiskSpace = async () => {
-  if (!platformStore.isImplemented('androidPermissionGate')) return;
   try {
     const res = await invoke<DiskSpaceDto>('plugin:vcp-mobile|get_free_disk_space');
     freeDiskSpaceGB.value = res.freeGb;
@@ -87,7 +96,6 @@ const checkDiskSpace = async () => {
 };
 
 const request = async (type: 'notification' | 'battery') => {
-  platformStore.require('androidPermissionGate');
   try {
     await invoke('plugin:vcp-mobile|request_android_permission', { pType: type });
   } catch (e) {
@@ -96,7 +104,6 @@ const request = async (type: 'notification' | 'battery') => {
 };
 
 const triggerPowerManagementSettings = async () => {
-  platformStore.require('androidPermissionGate');
   try {
     await invoke('plugin:vcp-mobile|request_power_management_permission');
     hasClickedPower.value = true;
@@ -106,7 +113,6 @@ const triggerPowerManagementSettings = async () => {
 };
 
 const triggerNotificationListenerSettings = async () => {
-  platformStore.require('androidPermissionGate');
   try {
     await invoke('plugin:vcp-mobile|request_notification_listener_permission');
     hasClickedListener.value = true;
@@ -116,7 +122,6 @@ const triggerNotificationListenerSettings = async () => {
 };
 
 const exitApp = async () => {
-  platformStore.require('moveTaskToBack');
   try {
     await invoke('plugin:vcp-mobile|move_task_to_back');
   } catch (e) {
@@ -141,7 +146,12 @@ const onVisibilityChange = () => {
 };
 
 onMounted(() => {
-  if (!platformStore.isImplemented('androidPermissionGate')) return;
+  if (permissionItems.length === 0) {
+    void lifecycleStore.bootstrap(true).catch(error => {
+      console.error('[PermissionGate] Failed to continue startup:', error);
+    });
+    return;
+  }
   check();
   // 当应用从后台切回前台时重检（用户在设置页操作后返回）
   window.addEventListener('visibilitychange', onVisibilityChange);
@@ -159,7 +169,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="vcp-permission-gate vcp-safe-inline fixed inset-0 z-gate bg-white flex flex-col items-center select-none overflow-hidden no-rubber-band">
+  <div v-if="permissionItems.length > 0" class="vcp-permission-gate vcp-safe-inline fixed inset-0 z-gate bg-white flex flex-col items-center select-none overflow-hidden no-rubber-band">
     <!-- Top Section: 米白（所有步骤共享） -->
     <div class="vcp-permission-hero w-full bg-[#FAF6EE] flex flex-col items-center px-5 pb-3 shrink-0">
       <!-- Top Illustration Area -->
@@ -171,7 +181,7 @@ onUnmounted(() => {
         <div class="vcp-permission-logo w-32 h-32 rounded-3xl flex items-center justify-center mb-1 relative z-10">
           <img src="/vcpmobile.svg" class="w-24 h-24" />
         </div>
-        <h1 class="text-xl font-semibold text-gray-900 tracking-[0.05em] mb-1">VCP Mobile Android</h1>
+        <h1 class="text-xl font-semibold text-gray-900 tracking-[0.05em] mb-1">VCP Mobile</h1>
         <p class="vcp-permission-description text-sm text-[#8B7D6B] text-center leading-relaxed px-4">
           将 VCPMobile 部署到你的手机，通过这台手机和智能体对话，建议使用闲置手机
         </p>
@@ -181,7 +191,7 @@ onUnmounted(() => {
     <!-- Bottom Section -->
     <div class="w-full flex-1 flex flex-col min-h-0">
       <!-- Progress Indicator -->
-      <div class="flex items-center w-full px-5 pt-4 mb-2 shrink-0">
+      <div v-if="isAndroid" class="flex items-center w-full px-5 pt-4 mb-2 shrink-0">
         <!-- Step 1 -->
         <div class="w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors duration-300"
           :class="currentStep === 1 ? 'border-gray-900' : (currentStep > 1 ? 'border-gray-900 bg-gray-900' : 'border-gray-100')">
@@ -219,26 +229,23 @@ onUnmounted(() => {
             </p>
             <div class="w-full space-y-3 mb-4">
               <!-- Permission Cards -->
-              <div v-for="item in [
-                { id: 'notification', name: '系统通知', desc: '显示 Agent 运行状态和即时提醒', icon: 'i-heroicons-bell' },
-                { id: 'battery', name: '后台运行权限', desc: '切换到后台时保持连接不被系统中断', icon: 'i-heroicons-arrow-path' }
-              ]" :key="item.id"
+              <div v-for="item in permissionItems" :key="item.id"
                 class="group flex items-center gap-4 px-4 py-3 rounded-2xl bg-gray-100/50 active:bg-gray-200/60 transition-all"
               >
                 <div class="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center shrink-0">
-                  <div :class="[item.icon, status[item.id as keyof PermissionStatusDto] ? 'text-green-500' : 'text-blue-500']" class="text-xl transition-colors duration-500"></div>
+                  <div :class="[item.icon, status[item.id] ? 'text-green-500' : 'text-blue-500']" class="text-xl transition-colors duration-500"></div>
                 </div>
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2">
                     <span class="font-semibold text-gray-900">{{ item.name }}</span>
                     <Transition name="fade">
-                      <span v-if="status[item.id as keyof PermissionStatusDto]" class="text-[9px] px-1.5 py-0.5 bg-green-500/10 text-green-600 rounded-md font-black uppercase tracking-wider">OK</span>
+                      <span v-if="status[item.id]" class="text-[9px] px-1.5 py-0.5 bg-green-500/10 text-green-600 rounded-md font-black uppercase tracking-wider">OK</span>
                     </Transition>
                   </div>
                   <p class="text-xs text-gray-500 opacity-70 leading-relaxed">{{ item.desc }}</p>
                 </div>
-                <button v-if="!status[item.id as keyof PermissionStatusDto]"
-                  @click="request(item.id as any)"
+                <button v-if="!status[item.id]"
+                  @click="request(item.id)"
                   class="px-3 py-1.5 bg-gray-900 text-white text-[13px] font-bold rounded-lg active:scale-95 transition-all shrink-0"
                 >
                   去授权
@@ -262,7 +269,7 @@ onUnmounted(() => {
           </div>
 
           <!-- ========== Step 2: Battery Optimization ========== -->
-          <div class="w-full h-full flex-shrink-0 flex flex-col px-5 overflow-y-auto">
+          <div v-if="isAndroid" class="w-full h-full flex-shrink-0 flex flex-col px-5 overflow-y-auto">
             <h3 class="text-lg font-semibold text-gray-900 mb-2 px-1 w-full">品牌厂商后台管理</h3>
             <p class="text-sm text-[#8B7D6B] leading-relaxed mb-4 px-1">
               由于国产手机系统拥有极其激进的后台强杀机制，必须强制前往设置允许后台完全运行并开启通知监听守护。
@@ -350,7 +357,7 @@ onUnmounted(() => {
           </div>
 
           <!-- ========== Step 3: Hardened Keep-Alive & Storage Check ========== -->
-          <div class="w-full h-full flex-shrink-0 flex flex-col px-5 overflow-y-auto">
+          <div v-if="isAndroid" class="w-full h-full flex-shrink-0 flex flex-col px-5 overflow-y-auto">
             <h3 class="text-lg font-semibold text-gray-900 mb-2 px-1 w-full">系统运行环境与存储空间检测</h3>
             <p class="text-sm text-[#8B7D6B] leading-relaxed mb-4 px-1">
               完成应用锁定配置并确保充足的系统存储空间，以保障后台服务的高可用性。

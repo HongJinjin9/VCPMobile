@@ -1,21 +1,21 @@
 # Phase 2：验收与 Phase 3 交接
 
-> **复审更新：**本篇保留初次施工与升级前验证记录。2026-10-08 复审发现的 G1 Swift 白名单问题已按用户要求通过[精简 G1](./10-G1流程精简.md)处理；单 Scene 恢复和订阅故障提示问题仍待修复。当前依赖、验证和处理范围见 [08-代码复审与遗漏清单](./08-代码复审与遗漏清单.md)，不以初次“源码完成”声明关闭阶段。
+> **2026-10-09 更新：**第 1、4、5 节是当前交接，第 2、3 节明确保留首次施工的历史证据。R1 已通过精简 G1 处理，R2/R3 已按 11–13 实施；全局能力查询/四轴表已撤销。阶段仍缺真实 G1 结果，不以初次“源码完成”声明关闭验收。
 
 > 2026-10-08。**阶段二源码接入、工程输入和本地验证已完成；G1 Apple 构建仍待手动执行，阶段验收尚未关闭。** 施工基线 `aff70257`。阶段二与后续 Tauri 2.12.1 升级按用户授权一并本地提交，未推送或触发 Actions；下表保留升级前的阶段验证记录。
 
 ## 1. 交付结果
 
-- Swift 静态 package、FFI binding、`ios_path`、真实 iOS plugin handle 和两个内部 selector 已连接。
-- lifecycle capability 读取 Swift 实际观测；完整 network telemetry 等其余原生能力继续沿既定范围延期或待实现。
+- Swift 静态 package、FFI binding、`ios_path`、真实 iOS plugin handle 与唯一事件注册 selector 已连接。
+- 平台身份改用 OS 插件同步信息；全局能力表/Swift 查询/前端 Store 和通用 Rust 能力门禁已删除。获批的通知、设备与 Distributed 原生实现交 Phase 3。
 - Scene/App phase、NWPath Channel、Rust native sequence/epoch 和 Vue 恢复消费贯通。iOS 初始相位未知时不提前恢复，保留 inactive 与 background 的区别。
-- 原生请求各保留至多一个底层 receiver；调用方取消/超时后的迟到响应不会触发上游 dropped receiver panic。
-- iOS 15.0、单 Scene、隐私资源、图标与三条 SwiftPM 构建链的受控 resolution 已写入可重放工程输入；手动 G1 workflow 独立于现有 Android CI/Release。
-- vendored tao 0.35.3 只改三个 iOS 文件，修复 Scene gate 和 delegate 返回对象所有权；来源、原始 checksum 与撤销条件完整登记。
+- 唯一原生注册独立等待真实结果、保留一个底层 receiver；外层取消不丢接收，真实失败由 live/snapshot 重放，新 WebView 可获知。
+- iOS 15.0、单 Scene、隐私和图标仍有可重放输入；G1 直接执行正常工具链，集中 resolution/shim 已删除。
+- 官方 tao 0.37.1 替代旧 vendor；app `ios_window` 接入单窗口恢复，不重复建立 Rust 核心或原生 Channel。
 
 入口与资源覆盖见 [01](./01-生产入口覆盖记录.md)，实现细节见 02–06。源码完成不代表已有可安装或可签名的 iOS 产物。
 
-## 2. 已取得的验证
+## 2. 首次施工的历史验证（升级及后续重构前）
 
 | 检查 | 实际结果 | 能说明什么 |
 |---|---|---|
@@ -38,7 +38,7 @@ Android 检查中出现一条 vendored tao `window.rs::hit_test` dead_code 警�
 
 未执行 Kotlin/Gradle 编译，因为本阶段没有修改 Kotlin、Android Manifest 或 Gradle 输入；取得的是 Android Rust 目标证据。未进行 Apple 编译、Simulator/设备操作、签名或发布。
 
-## 3. 审查发现与闭环
+## 3. 初次审查的历史处理（非当前待办）
 
 1. **tao 单 Scene**：把“采用 Scene 生命周期”与“允许多个 Scene”分开，`UIApplicationSupportsMultipleScenes=false` 仍保留；首窗口创建继续等待 Scene connect。
 2. **delegate 返回对象**：用 `Retained::autorelease_ptr` 保留返回的 UISceneConfiguration 至调用者取得它，避免原局部 Retained drop 后悬垂。
@@ -50,9 +50,9 @@ Android 检查中出现一条 vendored tao `window.rs::hit_test` dead_code 警�
 
 ## 4. G1 尚待执行
 
-[workflow](../../../.github/workflows/ios-g1.yml) 与 [工程说明](../../../src-tauri/ios/README.md) 已可审查。本地提交授权已经取得；仍需后续明确授权推送并手动运行 G1，回收 Apple 编译/链接与真实 archive 检查结果。当前 iOS 实施与 G1 保持暂停。
+[workflow](../../../.github/workflows/ios-g1.yml) 与 [工程说明](../../../src-tauri/ios/README.md) 已可审查。当前源码工作已恢复；推送和手动 G1 没有因此自动执行，实际运行仍按用户授权。取得 Apple 编译/链接及 archive 后再记录对应输入和结果。
 
-G1 主要核对 Swift/Objective-C 类型与 ABI、FFI 初始化符号、single Scene 配置、deployment target、三条 Swift resolution、device archive 与隐私资源实际装配。build-only 结果仍不能证明系统回调已在设备执行。若出现具体诊断，按 02–06 所列 owner 修复并集中复验。
+G1 提供 Swift/Objective-C 类型与 ABI、iOS Rust 编译、实际链接/配置/资源的工具诊断和 device archive，不再检查人工三 root 集合。产物审查与编译结果分开，build-only 不能证明系统回调已经执行；具体诊断按真实 owner 修复。
 
 ## 5. Phase 3 可使用的输入与仍需完成的工作
 
@@ -63,9 +63,12 @@ G1 主要核对 Swift/Objective-C 类型与 ABI、FFI 初始化符号、single S
 | 网络恢复 | 原 native Channel → Vue 同一恢复入口 | 回扫服务器连接恢复、错误重试与 trusted LAN 策略；NWPath 不代表服务器可达 |
 | SQLite/Settings/Diary/CAS | Phase 1 目录边界及现有业务 owner | 验证初始化、持久化、迁移、错误与数据提交点；SQLite 不启用新动态扩展路径 |
 | Sync | iOS 仍无 Phase 5 后台租约 | 先实现前台有界流程，并修正当前 `is_android` 不能代表所有移动平台的 loopback 策略 |
-| native request/Channel | 两类请求有界保活，bootstrap 单次订阅 | 后续长任务加入 generation/terminal 时继续保留底层接收；订阅真失败现需用户重启，不新增无界 Channel |
+| native request/Channel | 唯一事件注册有界接收，bootstrap 单次订阅，真实失败进程内保留 | 后续长任务沿真实 owner 定义 generation/terminal；前端重试不重装 Channel，不新增无界注册 |
+| 平台身份与权限 UI | OS 插件同步身份；Gate 共用外壳，当前 iOS 尚无实际权限项目 | Phase 3 接入真实权限检查/请求/拒绝/返回刷新，不恢复能力查询或虚构 Android 同名权限 |
+| 通知、设备与 Distributed | 通知 producer 和设备 adapter 未实现；Distributed 可浏览/保存配置但尚不运行 | 按 Phase 3 P3-3 至 P3-5 接通实际结果、部分数据缺失、通知点击和节点清理；Root/CLI 无法迁移时逐工具说明 |
+| 文件媒体与双向分享 | HTML 子路径、现有 CAS 及共享选择器 owner 可复用，原生获取/分享未接入 | Phase 4 接拍照/相册保存/Files/预览导出/双向分享/缓存；Extension 与自签输入交 Phase 6 |
 | 工程 | iOS 15.0、受控单 Scene 与 G1 | 保存实际 Apple 诊断；G2 集成打包仍在 Phase 6 |
 
-能力查询在订阅前可返回 runtime unknown；查询失败可重试，真实订阅 reject/source failure 不会被查询重试修好。前端不可把 implemented 当作已授权或当前一定可用。
+平台身份不表示已获系统授权，前端 bootstrap 不再查询能力。首个真实 phase、系统权限、任务终态仍各由实际 owner 决定；后台 SSE 的严格目标和空音频候选归 Phase 5，不能把“尽力后台”文案当作该目标完成。
 
 后续独立源码任务可按依赖推进，但阶段二 G1 必须保持“待执行”，直到获得真实 Actions 结果。

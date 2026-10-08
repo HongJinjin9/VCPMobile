@@ -54,7 +54,7 @@ src/
 
 `floating-main.ts` 是浮动助手，现已退役，仅存档。
 
-`appLifecycle.bootstrap` 先读取 `core/stores/platform.ts` 的 Rust 平台能力快照，再选择权限和原生功能入口。能力的 support/implementation 与实际 authorization/runtime 分开；查询失败由原启动 owner 重试，Feature 不以 UA 或 host fixture 推断原生功能成功。
+前端从 [core/utils/platform.ts](core/utils/platform.ts) 同步取得 OS 插件提供的平台身份，普通差异由共享 Vue 中的运行时分支处理。`appLifecycle.bootstrap` 继续拥有启动编排；实际权限、生命周期和任务状态由各自操作取得，平台识别不再等待能力查询。具体约定见 [跨平台开发规范](../docs/CROSS_PLATFORM_DEVELOPMENT.md)。
 
 `useAppLifecycle` 将 iOS 原生 network online 与既有浏览器 online 汇入同一个流恢复 owner；iOS 在首次真实 active snapshot 前不发起恢复。卸载释放两条原生监听，迟到安装立即释放；网络路径可用只表示可以尝试对账，不表示服务端已可达。
 

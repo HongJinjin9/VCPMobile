@@ -3,6 +3,8 @@
 > 启动日期：2026-10-08。输入基线：`4c6e25bba72a9883f4c5270c1daf2493850bd04e` 加本轮开始时未提交工作树。
 > 阶段状态和实际检查结果以 [05-验收记录与Magi交接.md](./05-验收记录与Magi交接.md) 为准；本阶段不代表 iOS 已能构建或运行。
 
+2026-10-09 校准：本目录保存上述基线的历史输入、源码盘点和执行证据，scripts/evidence 未刷新。Phase 1 已完成原契约施工，Phase 2 已接 Swift/Channel 并改用 `plugin-os` 同步平台身份；旧能力表与已被覆盖的延期决定不再是施工要求。当前范围见 [最新功能审批](../phase-2/09-功能权限与提示审议表.md)，活动交接见本目录 04/05 的更新段落。
+
 ## 工作入口
 
 | 文档 | 内容 |
@@ -16,4 +18,4 @@
 | [evidence/input-baseline.json](./evidence/input-baseline.json) | 开始时已修改路径及原始字节 SHA-256；不是本轮完成快照 |
 | [scripts/audit-command-surface.mjs](./scripts/audit-command-surface.mjs) | 从当前生产源抽取命令面；用法与限制见 02 |
 
-研究正文 00–09 保留专题背景；各阶段施工细节和结果写在阶段目录，当前生产代码继续定义实现事实。下一个工作区为 [Phase 1](../phase-1/README.md)。
+主线 00–09 按最新审批维护，历史输入保留在各阶段记录。当前源码和修正进度见 [Phase 2](../phase-2/README.md)，获批待接入任务见 [Phase 3](../phase-3/README.md) 至 [Phase 6](../phase-6/README.md)；不再重复启动 Phase 1 的能力表任务。

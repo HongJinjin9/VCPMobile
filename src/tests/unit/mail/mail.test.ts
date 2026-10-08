@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import {
   addressingOf,
@@ -19,9 +19,15 @@ import {
   renderMailMarkdown,
 } from '@/features/mail/mailTypes';
 import { useMailStore } from '@/features/mail/mailStore';
-import { usePlatformStore } from '@/core/stores/platform';
-import { platformFixture } from '@/tests/fixtures/platform';
 import { clearInvokeMocks, mockInvoke } from '../../mocks/tauri';
+
+const testPlatform = vi.hoisted(() => ({ value: 'android' as 'android' | 'ios' }));
+vi.mock('@/core/utils/platform', () => ({
+  get nativePlatform() { return testPlatform.value; },
+  get isAndroid() { return testPlatform.value === 'android'; },
+  get isIOS() { return testPlatform.value === 'ios'; },
+}));
+beforeEach(() => { testPlatform.value = 'android'; });
 
 const baseState = () => ({
   status: 'success',
@@ -316,7 +322,7 @@ describe('邮箱 · V1.1（补丁端点）', () => {
   });
 
   it.each(['android', 'ios'] as const)('%s 附件导出门禁不影响读取正文与附件元数据', async (platform) => {
-    usePlatformStore().snapshot = platformFixture(platform);
+    testPlatform.value = platform;
     mockBase();
     const calls: string[] = [];
     mockInvoke('mail_read', () => ({

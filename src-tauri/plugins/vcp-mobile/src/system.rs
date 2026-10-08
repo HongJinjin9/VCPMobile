@@ -440,7 +440,7 @@ pub fn get_network_status<R: Runtime>(app: AppHandle<R>) -> Result<NetworkStatus
     #[cfg(target_os = "ios")]
     {
         let _ = app;
-        crate::ios_unsupported("get_network_status")
+        crate::ios_not_implemented("get_network_status")
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
@@ -482,7 +482,7 @@ pub fn open_file_native<R: Runtime>(
     {
         let _ = (app, path);
         if action == "share" {
-            return crate::ios_unsupported("open_file_native.share");
+            return crate::ios_not_implemented("open_file_native.share");
         }
         crate::ios_not_implemented::<()>("open_file_native")?;
     }
@@ -710,7 +710,7 @@ pub fn save_image_to_gallery<R: Runtime>(
     #[cfg(target_os = "ios")]
     {
         let _ = (app, source_url, file_name);
-        crate::ios_unsupported("save_image_to_gallery")
+        crate::ios_not_implemented("save_image_to_gallery")
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
@@ -743,7 +743,7 @@ pub fn save_image_from_path<R: Runtime>(
     #[cfg(target_os = "ios")]
     {
         let _ = (app, image_path, file_name);
-        crate::ios_unsupported("save_image_from_path")
+        crate::ios_not_implemented("save_image_from_path")
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
@@ -1060,7 +1060,7 @@ pub fn register_shared_files<R: Runtime>(
     #[cfg(target_os = "ios")]
     {
         let _ = (app, owner_id, files);
-        crate::ios_unsupported("register_shared_files")
+        crate::ios_not_implemented("register_shared_files")
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
@@ -1185,7 +1185,7 @@ pub async fn sample_sensor_data<R: Runtime>(
     #[cfg(target_os = "ios")]
     {
         let _ = (app, location, motion, ambient);
-        crate::ios_unsupported("sample_sensor_data")
+        crate::ios_not_implemented("sample_sensor_data")
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
@@ -1219,7 +1219,7 @@ pub fn get_cpu_thermal_status<R: Runtime>(app: AppHandle<R>) -> Result<String, S
     #[cfg(target_os = "ios")]
     {
         let _ = app;
-        crate::ios_unsupported("get_cpu_thermal_status")
+        crate::ios_not_implemented("get_cpu_thermal_status")
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
@@ -1250,7 +1250,7 @@ pub fn get_gpu_status<R: Runtime>(app: AppHandle<R>) -> Result<GpuStatus, String
     #[cfg(target_os = "ios")]
     {
         let _ = app;
-        crate::ios_unsupported("get_gpu_status")
+        crate::ios_not_implemented("get_gpu_status")
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
@@ -1353,7 +1353,7 @@ pub fn write_clipboard_native<R: Runtime>(
     #[cfg(target_os = "ios")]
     {
         let _ = (app, content);
-        crate::ios_unsupported::<()>("write_clipboard_native")?;
+        crate::ios_not_implemented::<()>("write_clipboard_native")?;
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
@@ -1376,7 +1376,7 @@ pub fn read_clipboard_native<R: Runtime>(app: AppHandle<R>) -> Result<String, St
     #[cfg(target_os = "ios")]
     {
         let _ = app;
-        crate::ios_unsupported("read_clipboard_native")
+        crate::ios_not_implemented("read_clipboard_native")
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
@@ -1404,7 +1404,7 @@ pub fn send_notification_native<R: Runtime>(
     #[cfg(target_os = "ios")]
     {
         let _ = (app, title, body);
-        crate::ios_unsupported::<()>("send_notification_native")?;
+        crate::ios_not_implemented::<()>("send_notification_native")?;
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
@@ -1545,7 +1545,7 @@ pub fn get_pending_notification<R: Runtime>(
     #[cfg(target_os = "ios")]
     {
         let _ = app;
-        crate::ios_unsupported("get_pending_notification")
+        crate::ios_not_implemented("get_pending_notification")
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {

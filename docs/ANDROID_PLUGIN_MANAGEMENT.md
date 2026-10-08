@@ -222,7 +222,7 @@ Insets 事件的附加约束：
 
 ### 7.1 插件命令静默拒绝
 
-如果插件命令被调用但没有任何反应（无错误、无返回），**首先检查 `capabilities/default.json` 是否包含 `"vcp-mobile:default"`**。Tauri v2 的能力系统会静默拒绝未授权命令。
+如果插件命令没有产生预期结果，先沿调用链检查返回值和日志，并核对实际平台 capability 文件中的命令配置。当前配置位于 `src-tauri/capabilities/android-main.json` 与 `ios-main.json`；按实际消费者配置相应命令，不套用旧的 `default.json` 或整包 `vcp-mobile:default` 指引。
 
 ### 7.2 POST_NOTIFICATIONS 是通知的前提
 
@@ -255,7 +255,7 @@ Android 13+ 上，没有 `POST_NOTIFICATIONS` 静态声明 + 动态请求，**�
 
 > **目的**：为 VCP Mobile 后续功能扩展提供插件选型依据，减少重复造轮子。
 > **统计口径**：基于 Tauri v2.0+ 官方插件列表与 awesome-tauri 社区生态（2026-05）。
-> **产品边界**：下表中的 Desktop/iOS 条目只是上游生态事实，不表示 VCP Mobile 支持或计划支持这些平台；本项目只发布 Android `arm64-v8a`，桌面由 VCPChat 承担。
+> **产品边界**：下表描述上游插件生态，不代表本项目已经接入。VCP Mobile 的生产平台为 Android `arm64-v8a`，iOS 为分期实施的实验性自签目标；桌面由 VCPChat 承担。
 
 ---
 

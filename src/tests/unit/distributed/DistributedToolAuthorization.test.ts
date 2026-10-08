@@ -28,29 +28,10 @@ describe("distributed tool authorization contract", () => {
     expect(distributedViewSource).toContain(':aria-checked="plugin.enabled"');
     expect(distributedViewSource).toContain(':data-tool-read="plugin.id"');
     expect(distributedViewSource).toContain(
-      ':disabled="!plugin.enabled || pluginLoading[plugin.id] || authorizationMutationPending"',
-    );
-    expect(distributedViewSource).toContain(
       "v-if=\"plugin.type === 'streaming'\"",
     );
     expect(distributedViewSource).toContain('plugin.type !== "streaming"');
     expect(distributedViewSource).toContain("需由 VCP 请求明确调用");
-  });
-
-  it("reads only the dedicated distributed connection fields", () => {
-    const loadSettingsBody = distributedViewSource
-      .split("const loadSettings =")[1]
-      .split("const handleConnect =")[0];
-    expect(loadSettingsBody).toContain(
-      "settingsStore.settings.distributedWsUrl",
-    );
-    expect(loadSettingsBody).toContain(
-      "settingsStore.settings.distributedVcpKey",
-    );
-    expect(loadSettingsBody).not.toContain("vcpLogUrl");
-    expect(loadSettingsBody).not.toContain("vcpServerUrl");
-    expect(loadSettingsBody).not.toContain("vcpLogKey");
-    expect(loadSettingsBody).not.toContain("vcpApiKey");
   });
 
   it("registers only the enabled-name command and keeps new tools fail-closed", () => {

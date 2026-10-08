@@ -2,7 +2,7 @@ import { defineStore } from 'pinia';
 import { computed, onScopeDispose, ref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { usePlatformStore } from './platform';
+import { isAndroid } from '../utils/platform';
 import {
   UPDATE_STATUS_EVENT,
   type UpdateState,
@@ -27,14 +27,13 @@ const IDLE_STATUS: UpdateStatus = {
 export const useUpdateStore = defineStore('update', () => {
   const status = ref<UpdateStatus>({ ...IDLE_STATUS });
   const isPromptOpen = ref(false);
-  const platformStore = usePlatformStore();
   let initialized = false;
   let initPromise: Promise<void> | null = null;
   let unlistenStatus: (() => void) | null = null;
   let disposed = false;
 
   const requireUpdater = () => {
-    platformStore.require('apkUpdate');
+    if (!isAndroid) throw new Error('应用内 APK 更新仅适用于 Android');
     if (disposed) throw new Error('更新状态已释放');
   };
 

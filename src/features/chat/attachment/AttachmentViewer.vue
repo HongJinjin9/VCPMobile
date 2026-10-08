@@ -5,7 +5,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { X, ExternalLink, Download } from "lucide-vue-next";
 import { saveImageToGallery } from "tauri-plugin-vcp-mobile";
 import { useNotificationStore } from "../../../core/stores/notification";
-import { usePlatformStore } from "../../../core/stores/platform";
+import { isAndroid } from "../../../core/utils/platform";
 import type { Attachment } from "../../../core/types/chat";
 
 const props = defineProps<{
@@ -18,7 +18,6 @@ const emit = defineEmits(["close", "open-external"]);
 const { registerModal, unregisterModal } = useModalHistory();
 const modalId = 'AttachmentViewer';
 const notificationStore = useNotificationStore();
-const platformStore = usePlatformStore();
 const hasLocalCapability = computed(() =>
   !!props.file &&
   props.file.status !== "desktop_only" &&
@@ -127,7 +126,7 @@ watch(() => props.isOpen, async (newVal, _oldVal, onCleanup) => {
       } catch (e) {
         if (!active || (e instanceof DOMException && e.name === "AbortError")) return;
         console.error('[AttachmentViewer] Failed to load text preview:', e);
-        previewText.value = platformStore.isImplemented('fileOpen')
+        previewText.value = isAndroid
           ? "⚠️ 本地文件预览失败，请使用外部应用打开。"
           : "⚠️ 本地文件预览失败。";
       } finally {
@@ -166,7 +165,6 @@ const saveToAlbum = async () => {
   if (!props.file || !hasLocalCapability.value || isSaving.value) return;
   isSaving.value = true;
   try {
-    platformStore.require('gallerySave');
     const sourceUrl = props.file.internalPath || props.file.src;
     if (!sourceUrl) {
       throw new Error("图片路径为空");
@@ -213,7 +211,7 @@ const saveToAlbum = async () => {
         </div>
         <div class="flex items-center gap-1">
           <button
-            v-if="isImage && hasLocalCapability && platformStore.isImplemented('gallerySave')"
+            v-if="isImage && hasLocalCapability && isAndroid"
             @click="saveToAlbum"
             :disabled="isSaving"
             class="p-2 -mr-1 rounded-full text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 transition-colors active:bg-black/5 dark:active:bg-white/5 disabled:opacity-40"
@@ -222,7 +220,7 @@ const saveToAlbum = async () => {
             <Download :size="20" />
           </button>
           <button
-            v-if="hasLocalCapability && platformStore.isImplemented('fileOpen')"
+            v-if="hasLocalCapability && isAndroid"
             @click="$emit('open-external', file?.internalPath || file?.src)"
             class="p-2 -mr-1 rounded-full text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 transition-colors active:bg-black/5 dark:active:bg-white/5"
           >
@@ -251,9 +249,9 @@ const saveToAlbum = async () => {
             v-if="isTextTruncated"
             class="px-3 py-2 bg-yellow-500/10 border border-yellow-500/20 text-yellow-700 dark:text-yellow-400 text-xs rounded-lg flex items-center justify-between shrink-0"
           >
-            <span>📄 当前文件过大，已自动为您预览前 128KB。<template v-if="platformStore.isImplemented('fileOpen')">要阅读全文，请使用外部应用打开。</template></span>
+            <span>📄 当前文件过大，已自动为您预览前 128KB。<template v-if="isAndroid">要阅读全文，请使用外部应用打开。</template></span>
             <button
-              v-if="platformStore.isImplemented('fileOpen')"
+              v-if="isAndroid"
               @click="$emit('open-external', props.file?.internalPath || props.file?.src)"
               class="px-2 py-1 bg-yellow-500/20 hover:bg-yellow-500/30 rounded text-[10px] font-bold active:scale-95 transition-transform shrink-0 ml-2"
             >

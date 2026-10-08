@@ -5,7 +5,6 @@
 import { ref, readonly, onUnmounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { usePlatformStore } from "../../../core/stores/platform";
 
 export interface DistributedStatus {
   state: "disconnected" | "connecting" | "connected" | "disconnecting";
@@ -109,7 +108,7 @@ export function useDistributed() {
   }
 
   async function activate() {
-    if (isThisInstanceActive.value || !usePlatformStore().isImplemented('distributed')) return;
+    if (isThisInstanceActive.value) return;
     isThisInstanceActive.value = true;
     listenerCount++;
     const generation = listenerGeneration;
@@ -143,7 +142,6 @@ export function useDistributed() {
   });
 
   async function refreshStatus(generation = listenerGeneration): Promise<void> {
-    if (!usePlatformStore().isImplemented('distributed')) return;
     const eventRevision = statusEventRevision;
     try {
       const s = await invoke<DistributedStatus>("get_distributed_status");

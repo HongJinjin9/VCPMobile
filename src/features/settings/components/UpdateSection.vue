@@ -2,7 +2,8 @@
 import { ref, onMounted, computed } from 'vue';
 import { getVersion } from '@tauri-apps/api/app';
 import { useUpdateStore } from '../../../core/stores/update';
-import { usePlatformStore } from '../../../core/stores/platform';
+import { useNotificationStore } from '../../../core/stores/notification';
+import { isAndroid, isIOS, nativePlatform } from '../../../core/utils/platform';
 import SettingsRow from '../../../components/settings/SettingsRow.vue';
 import SettingsActionButton from '../../../components/settings/SettingsActionButton.vue';
 import SettingsInlineStatus from '../../../components/settings/SettingsInlineStatus.vue';
@@ -16,15 +17,18 @@ const justCheckedNoUpdate = ref(false);
 const autoCheckEnabled = ref(localStorage.getItem(AUTO_CHECK_KEY) !== 'off');
 
 const updateStore = useUpdateStore();
-const platformStore = usePlatformStore();
+const notificationStore = useNotificationStore();
 
 onMounted(async () => {
-  if (!platformStore.isImplemented('apkUpdate')) return;
-  void updateStore.init().catch((error) => console.warn('[UpdateSection] Init failed:', error));
-  try {
-    currentVersion.value = await getVersion();
-  } catch (e) {
-    console.error('[UpdateSection] Failed to get version:', e);
+  if (isAndroid) {
+    void updateStore.init().catch((error) => console.warn('[UpdateSection] Init failed:', error));
+  }
+  if (nativePlatform !== null) {
+    try {
+      currentVersion.value = await getVersion();
+    } catch (e) {
+      console.error('[UpdateSection] Failed to get version:', e);
+    }
   }
 });
 
@@ -34,6 +38,10 @@ const onAutoCheckChange = (value: boolean) => {
 };
 
 const rowDescription = computed(() => {
+  if (!isAndroid) {
+    const version = currentVersion.value ? `当前版本: v${currentVersion.value} · ` : '';
+    return version + (isIOS ? '在应用外自行签名安装更新' : '应用内更新仅适用于 Android');
+  }
   const { state, info } = updateStore.status;
   switch (state) {
     case 'checking':
@@ -56,6 +64,7 @@ const rowDescription = computed(() => {
 
 const rowClickable = computed(() => {
   return (
+    !isAndroid ||
     !!updateStore.info?.hasUpdate ||
     ['downloading', 'verifying', 'installing', 'readyToInstall', 'failed'].includes(
       updateStore.state,
@@ -64,6 +73,10 @@ const rowClickable = computed(() => {
 });
 
 const checkUpdate = async () => {
+  if (!isAndroid) {
+    openPrompt();
+    return;
+  }
   checking.value = true;
   justCheckedNoUpdate.value = false;
   try {
@@ -84,12 +97,21 @@ const checkUpdate = async () => {
 };
 
 const openPrompt = () => {
+  if (!isAndroid) {
+    notificationStore.addNotification({
+      type: 'info',
+      title: '版本更新',
+      message: isIOS ? 'iOS 版本需在应用外自行签名安装更新' : '应用内 APK 更新仅适用于 Android',
+      toastOnly: true,
+    });
+    return;
+  }
   updateStore.openPrompt();
 };
 </script>
 
 <template>
-  <div v-if="platformStore.isImplemented('apkUpdate')" class="space-y-2">
+  <div class="space-y-2">
     <SettingsRow
       title="版本更新"
       :description="rowDescription"
@@ -117,7 +139,7 @@ const openPrompt = () => {
       </template>
     </SettingsRow>
 
-    <SettingsRow title="自动检查更新" description="启动时检查新版本（24 小时内最多一次）">
+    <SettingsRow v-if="isAndroid" title="自动检查更新" description="启动时检查新版本（24 小时内最多一次）">
       <template #action>
         <SettingsSwitch :model-value="autoCheckEnabled" @update:model-value="onAutoCheckChange" />
       </template>

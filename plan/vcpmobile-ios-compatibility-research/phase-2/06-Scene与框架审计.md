@@ -2,7 +2,7 @@
 
 > 以下保留 tao 0.35.3 的历史审计；本地补丁已由官方 tao 0.37.1 替代。Apple 构建与 G1 尚未执行。
 
-> 2026-10-08 再复审：当前 0.37.1 已确认存在单 Scene 同进程断开/重连后的窗口恢复缺口，本文末尾的保留项已进入修复清单；详见 [08 的 R2](./08-代码复审与遗漏清单.md)。
+> 2026-10-09 当前处置：后续 R2 已在 `e60ed51a` 通过 app `ios_window` 接入 ExitRequested/SceneRequested；未修改 registry 或重新引入 vendor。当前方案与实际 API 见 11–13，以下三文件补丁和旧依赖链仅是首次施工历史。
 
 > 2026-10-08。基线：Tauri 2.11.5、runtime-wry 2.11.4、tao 0.35.3、wry 0.55.1。本文记录源码与修改依据，不表示执行过 Apple 编译或设备启动。
 
@@ -10,7 +10,7 @@
 
 继续使用 iPhone/iPad **一个应用 Scene、一个 `main` WebView**。`UIApplicationSupportsMultipleScenes` 保持布尔 `false`；采用 Scene 生命周期不会开放第二个应用窗口。Apple 将 manifest 是否存在与是否允许同时存在多个 Scene 分别定义，不能将二者合并为一个能力。[Apple manifest 定义](https://developer.apple.com/documentation/bundleresources/information-property-list/uiapplicationscenemanifest)、[Apple multiple-scenes 定义](https://developer.apple.com/documentation/uikit/uiapplication/supportsmultiplescenes)。
 
-锁定 tao 有两处独立缺口，本次通过仓库内 `tao 0.35.3` 的最小 iOS 修改闭合：
+初次锁定 tao 0.35.3 的两处缺口曾通过以下补丁处理；现在由官方 0.37.1 提供对应实现，表内修补不再是活动任务：
 
 | 缺口 | 锁定源码行为 | 本次修改 |
 |---|---|---|
@@ -19,7 +19,7 @@
 
 第二项是上游已经修复的问题，采用相同的一行所有权修正。[上游 PR #1245](https://github.com/tauri-apps/tao/pull/1245)。
 
-## 2. 首窗口、Scene 与插件 attach
+## 2. 首次施工的首窗口、Scene 与插件 attach 链（历史）
 
 以下函数名以实际锁定源码为准，`tao/…` 对应本仓库 vendor 的 crate 相对路径；Tauri/runtime-wry 为锁文件选中的 crate 源。
 
@@ -73,12 +73,12 @@ tao 0.35.3 的 `sceneWillEnterForeground`、`sceneDidEnterBackground` 为空；`
 
 - Swift observer、Scene、Channel 和 NWPathMonitor 的替换、清理由插件持有；取消/替换通过 generation 丢弃旧投递。业务 Chat/Sync/DB 状态仍归 Rust。
 - 上游 PluginManager 的 `onWebviewCreated` 分支可能重复调用 `load`；VCP 自己检查同一 WebView，不能假定框架每实例仅调用一次。
-- 当前 tao 的冷启动 URL/document 处理不在本阶段补丁范围。D1–D19 未授权由此开放 iOS 分享接收、文档类型或 deep-link 产品入口，不因发现框架能力缺口顺带增加这些功能。
-- `sceneDidDisconnect` 的窗口恢复行为沿用锁定框架；本次没有实现多窗口/多 Scene 恢复机制。若后续在指定构建诊断中发现直接影响单 Scene 的问题，须回到这一窗口所有者修复。
+- 首次补丁未接入冷启动 URL/document 或分享接收。用户随后已批准 incoming share，具体 producer/Extension 和交接归 Phase 4；不因框架存在 URL 接口自动开放其他 deep-link 产品入口。
+- 后续 `sceneDidDisconnect` 相关单窗口恢复已按 R2 接入应用 owner；仍不建设多窗口/多 Scene 产品。当前 Rust 领域状态复用，新 WebView 的活动 Chat 输出接管归 Phase 3，不能由窗口已重建推断业务全部恢复。
 - 静态检查只覆盖当前 host target；G1 要记录 iOS Rust/Swift 编译、符号和最终 plist。工程检查不能声称实际 Scene attach、前后台回放或用户交互已在设备上验证；项目不建立 iOS 实机测试体系。
 
-## 6. 本轮证据与后续撤销
+## 6. 原补丁历史证据与撤销结果
 
 已执行：archive checksum 对比、全部原始文件比较、三文件差异审计、首窗口/Scene/插件装配的锁定源码追踪。Apple 构建状态与集中检查结果由本阶段验收记录统一登记，本文不预填通过。
 
-待未来依赖升级时，仅在新的 **可被 runtime-wry 接收的发布版本**同时包含 lifecycle gate 与所有权修复后移除 override。移除前重看 delegate 注册、`did_finish_launching`、`create_window` 三入口，保留 plist 的单 Scene 约束，重做当前改动所需的 host/Android 检查和指定 G1/G2 构建。
+上述撤销条件已在 Tauri 2.12.1/tao 0.37.1 升级时核对并执行，override/vendor 已移除；原始升级记录留在 Git `76ade999`。单 Scene plist 继续保留，G1/G2 仍待实际执行，不将 vendor 历史比较挪作 Apple 证据。

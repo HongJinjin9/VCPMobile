@@ -1,10 +1,12 @@
 # 09. Magi 综合审查与产品决定
 
-> 修订日期：2026-10-07。产品输入沿用 Git HEAD 旧稿记录的 2026-08-13 D1–D19，并落实本次用户确认的源码驱动开发方式。
+> 修订日期：2026-10-09。D1–D19 未被覆盖的边界继续有效；本次按 [Phase 2 功能权限与提示审议表](./phase-2/09-功能权限与提示审议表.md) 用户第四列的最新审批修订。该表保留用户原话，本文件记录其实施含义，旧延期和旧建议不再覆盖新决定。
 
-## 2026-10-07 联合裁决
+## 当前联合裁决
 
-以 Tauri 原生 iPhone/iPad 客户端为目标，复用 Vue/Rust 核心，实施 Swift adapter、原生附件与 iOS 26+ 尽力后台，最终生成供用户自行签名的实验性产物。开发按依赖源码、编译规则和状态推演持续推进，Apple 构建仅在阶段验收时通过 GitHub Actions 手动执行。
+以 Tauri 原生 iPhone/iPad 客户端为目标，复用 Vue/Rust 核心，实施原生附件、共同权限引导、本 App 系统通知、设备/网络与完整 Distributed、相机/相册保存和双向分享。SSE 后台持续接收为高优先专项，其他任务按尽力后台和明确收尾设计；最终生成用户自行签名的实验性产物。开发按依赖源码、编译规则和状态推演持续推进，Apple 构建仅在阶段验收时通过 GitHub Actions 手动执行。
+
+当前已经接通的是原生分支、目录与生命周期/网络 Channel 等基础，以及同步平台身份和说明入口。获批系统功能不因此成为已实现能力；具体任务、依赖与完成条件统一列在 [08](./08-分期实施路线图与验收门禁.md)。
 
 ## 三贤者独立意见
 
@@ -45,7 +47,7 @@
 - 附件三条导入链汇入 CAS 登记，原生 Files/PHPicker/ImageIO 保持 P0；
 - 大上传补 abort、generation 和清理，图片先读元数据再按预算解码。
 
-交互结论：适配以明确坐标、状态和资源归属完成；iPhone/iPad 的窗口与交互输入逐条纳入源码路径审计。历史已延期的相机、语音、通知等仍按原范围处理。
+交互结论：适配以明确坐标、状态和资源归属完成；iPhone/iPad 的窗口与交互输入逐条纳入源码路径审计。相机、相册保存、系统通知和双向分享已获批接入；语音仍未开发但保留点击说明。普通差异由共享 Vue 的运行时分支表达。
 
 ### Casper：务实与交付
 
@@ -53,8 +55,8 @@
 
 1. 目标依赖审计与平台契约；
 2. Swift/Channel/生命周期；
-3. 核心业务与原生附件；
-4. 尽力后台和前台回退；
+3. 核心业务、共同权限/通知/设备工具与原生文件媒体/分享；
+4. SSE 持续接收专项、其他尽力后台和前台回退；
 5. 构建脚本、device bundle 与用户签名输入；
 6. 阶段性 GitHub Actions 验收与实验产物打包。
 
@@ -73,26 +75,34 @@
 | ID | 既定产品选择 | 当前实施解释 |
 |---|---|---|
 | D1 | Tauri 原生 iPhone/iPad | 同一 Vue/Rust + Swift adapter |
-| D2 | iOS 26+ 尽力后台，其他情况前台常亮 | request/activate/progress/expiration/terminal 全链，服务端协议保持原范围 |
-| D3 | 接受按平台语义分类迁移 | 当前 42 条；核对本地预览接入后分类为 R3/S7/L15/X17，依据见 02 |
-| D4 | minimum 在实施中确定，新 API 分层 | 15.0 是工程候选；逐依赖/API 核对后显式设置 |
+| D2 | 其他任务沿用尽力后台；SSE 后台持续接收按最新审批优先解决 | P5-1 核对静音音频、continued task 等候选的实际条件；前台常亮与明确收尾是回退，不替代 SSE 新要求，也不承诺尚未证明的系统保证 |
+| D3 | 接受按平台语义分类迁移 | 以真实命令及消费者安排实现；02 的迁移分类用于理解接口差异，不定义 UI 可见性或新审批范围 |
+| D4 | minimum 在实施中确定，新 API 分层 | 15.0 已作为显式工程基线；新增 API 核对 availability，Apple 编译证据待 G1 |
 | D5 | iPhone+iPad、单 Scene、当前窗口宽度响应 | 复用组件树，按框架要求接 Scene 生命周期 |
-| D6 | 不可用入口隐藏或说明原因，命令返回真实结果 | capability、ACL、UI 与 Rust owner 同步 |
+| D6 | 不可用入口按用户逐项选择呈现，操作返回真实结果 | 更新/Root/语音保留说明；Vue 使用局部运行时分支，原生操作按实际需要接入，不恢复统一静态能力门禁 |
 | D7 | 安全默认 + 用户显式受信 LAN | LAN 属于首期，细化 Rust/WebKit transport 和拒绝恢复 |
 | D8 | Android Release 附属实验性 unsigned 产物，用户自签 | 06 的设备 `.app.zip` / 条件性 `.unsigned.ipa`；应用内更新归 Android |
-| D9 | incoming share 延期 | 保留现有 ticket/session 资产供后续使用 |
-| D10 | 系统通知/APNs 延期 | 首期 App 内通知中心/Toast |
+| D9 | incoming share 已批准接入，覆盖原延期 | P4-4 复用 ticket/session 与主 App 导入 owner；扩展及自签输入交给 P6 |
+| D10 | 本 App 系统通知已批准接入，覆盖原延期 | P3-3 接真实授权、发送和点击响应；App 内 Toast 保留。APNs 服务端、付费 Team 和读取其他 App 通知不自动纳入 |
 | D11 | 高密度线性 UI、语义层级、iPhone/iPad 基础可访问性 | 命中区、输入字号、焦点和返回，按实际 DOM/样式/事件路径审计 |
 | D12 | Swift adapter，单 Rust 业务 owner | 生命周期、附件、任务通过现有 IPC/Channel 连接 |
 | D13 | CI 候选 ID `com.vcp.avatar`，用户可改写 | 最终 ID、plist task 前缀和 entitlement 配套 |
 | D14 | 日常源码审计，Apple 构建仅用阶段性 GitHub Actions；项目 iOS 实机测试、正式签名及付费 Team 为范围外 | 2026-10-07 用户进一步固定验收方式；G1 接入、G2 集成/打包，手动触发，见 07/08 |
-| D15 | 首产物为核心业务 + 文档/文本/图片 + 尽力后台 | 前台核心作为中间里程碑，完整范围按 08 交付 |
+| D15 | 首产物保留核心业务与原生附件，并纳入本轮获批系统功能及 SSE 专项 | 前台核心是中间里程碑；P3–P5 获批项逐项记录实现与未关闭问题，完整范围按 08 推进 |
 | D16 | 采用静态正确性与硬上限，设备性能专项为范围外 | 审查像素、缓冲、副本和并发预算 |
-| D17 | 语音延期 | 保留范围决定；旧稿“Android 已不可用”修正为 MIME/扩展名契约问题 |
+| D17 | 语音仍未开发，入口保留并说明 | iOS 点击不请求麦克风，可继续文字输入；后续接入再修 MIME/扩展名契约 |
 | D18 | 原生获取/staging/大图，Rust 解析与 CAS，附件 P0 | Files/PHPicker/security scope/ImageIO 与三条导入链 |
 | D19 | 真实 token/字符/字节/chunk/terminal，未知总量表达为未知 | 领域计量与系统 Progress 分层，具体适配问题见 04 |
 
-相机、PhotoKit 保存、outgoing share、视频抽帧、完整遥测/Distributed 延期来自旧 02/05 的功能范围，随本表继续保留。
+相机、PhotoKit 保存、outgoing share、设备/完整网络信息与 Distributed 的原延期已被最新审批覆盖：媒体/分享归 Phase 4，设备工具/Distributed 归 Phase 3。语音实现、视频抽帧和 Android 本地 CLI 的原范围未被改变。关于页集中功能说明 U1 仍是未批准建议，不自动加入产品。
+
+### 2026-10-09 开发方式与新增任务
+
+- 共享 Vue 默认使用运行时平台分支；仅有真实的平台依赖或模块副作用时局部处理构建差异，不全面建设两套前端构建或平台映射。
+- 移除原 `platform.rs` 四字段表、Swift 静态能力查询及其启动链；系统权限和动态结果由真实操作取得，不为假想绕过增设另一层功能门禁。
+- 共同权限引导在 P3-2 接入，平台没有相应 API/设置的项目不显示；电量/空间在 P3-4 复现真实查询。磁盘 API 获批不等于把 Android 的 5 GB 启动阻断搬到 iOS。
+- SSE 专项保留用户提出的静音音频等候选并逐条件研究；不能将候选写成已采用/有效，也不能用原有尽力后台总结消解连续接收要求。无法覆盖的条件作为未关闭项明确报告。
+- 新功能继续复用 Rust 领域 owner、原生资源 owner 与现有提示消费者；CSP/Keychain 等独立安全改造不属于此次批准范围。
 
 ### 2026-10-07 用户追加决定：开发与验收节奏
 
@@ -106,13 +116,16 @@ N3/N5/N6 将 D2/D15 改成前台限定和真机研发门禁；N7/N8 改写了 D8
 
 | 问题 | 获取信息/实施动作 | 影响范围 |
 |---|---|---|
-| generated tree 归属 | 对照锁定 CLI 模板，列出生成文件与需要维护的配置 | 工程生成脚本 |
-| minimum/Xcode/SDK | 汇总依赖 deployment target，查看 runner 库存并固定输入 | 构建及 availability |
-| 连字符插件命名 | 核对 Package product、导出符号、Rust binding | Swift 链接 |
+| 现有 G1 工程输入 | Phase 2 已有生成脚本、Swift product/binding 与 minimum 配置；按锁定输入等待手动 G1 的实际编译诊断 | Phase 2 / G1 |
+| minimum/Xcode/SDK | 新增 adapter 对照锁定 SDK 与 deployment target，固定实际构建输入 | 构建及 availability |
+| 共同权限与通知 | 完成查询/请求/设置返回、发送与通知点击链，区分本地通知和 APNs | P3-2 / P3-3 |
+| 设备/网络与 Distributed | 接真实采样与逐工具执行，缺失字段明确报告，保留整体节点 | P3-4 / P3-5 |
+| 文件媒体与双向分享 | 闭合 picker/相机/相册/导出/预览与分享交接，确定扩展和自签输入 | P4-1–P4-4 |
+| WebKit 缓存 | 明确清理类别和结果，接共享维护页及实际 WebView owner | P4-5 |
+| SSE 后台持续接收 | 核对用户提出的静音音频、continued task 等候选的具体条件；形成选型、实现与未覆盖情况 | P5-1 / P5-2 |
 | 未知总量进度 | 读取 Progress/BGContinuedProcessingTask 声明，完成映射与 system end 分支 | continued-task progress adapter |
-| Keychain 迁移 | 盘点 secrets 消费、备份、登出和迁移路径 | 既有 P1 安全改进 |
-| Scene 接入 | 沿 Tauri/tao delegate/manifest 核对所选 SDK | 生命周期与启动 |
-| 自签 Bundle ID | 定义 plist/entitlement/task identifier 同步改写与检查 | 用户产物 |
+| 常亮与其他后台任务 | idle timer 持有/释放及 Sync/Log/Distributed/维护的 stop/join/恢复 | P5-4 |
+| 自签 Bundle ID | 主 App/扩展 ID、共享容器、各 target entitlement/profile 与 task identifier 配套改写 | P4-4 输入 / Phase 6 用户产物 |
 
 每个问题只影响表中对应路径；其他独立任务照 08 推进。
 

@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { shareFileNative } from 'tauri-plugin-vcp-mobile';
-import { usePlatformStore } from '../../../core/stores/platform';
+import { isAndroid, isIOS } from '../../../core/utils/platform';
 import { FileText, Trash2, Copy, Share2, ChevronLeft, ChevronRight } from 'lucide-vue-next';
 import { useOverlayStore } from '../../../core/stores/overlay';
 import { useNotificationStore } from '../../../core/stores/notification';
@@ -27,7 +27,6 @@ const notificationStore = useNotificationStore();
 const currentFile = ref<string | null>(null);
 const fileContent = ref<string>('');
 const shareBusy = ref(false);
-const platformStore = usePlatformStore();
 const currentPage = ref(0);
 const linesPerPage = 500;
 const totalPages = ref(0);
@@ -110,9 +109,16 @@ const copyCurrentFile = async () => {
 
 const shareCurrentFile = async () => {
   if (!currentFile.value || shareBusy.value) return;
+  if (!isAndroid) {
+    notificationStore.addNotification({
+      type: 'info',
+      message: isIOS ? '当前 iOS 版本尚未接入系统分享，可复制日志内容。' : '当前预览环境不提供原生分享，可复制日志内容。',
+      toastOnly: true,
+    });
+    return;
+  }
   shareBusy.value = true;
   try {
-    platformStore.require('outgoingShare');
     const path = await invoke<string>('prepare_sync_log_share_file', {
       filename: currentFile.value
     });
@@ -248,7 +254,7 @@ onMounted(() => {
           </button>
           <button
             :disabled="shareBusy"
-            v-if="platformStore.isImplemented('outgoingShare')"
+            v-if="isAndroid"
             class="flex min-h-9 items-center gap-1 border-l border-white/10 px-3 text-[10px] text-blue-300 transition-colors active:text-white disabled:opacity-30"
             @click="shareCurrentFile"
           >

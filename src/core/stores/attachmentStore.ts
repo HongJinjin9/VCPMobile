@@ -3,7 +3,7 @@ import { ref, nextTick } from "vue";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useNotificationStore } from "./notification";
-import { usePlatformStore } from "./platform";
+import { isAndroid } from "../utils/platform";
 import type { PickedFile } from "tauri-plugin-vcp-mobile";
 import type {
   NativeFileProgressDetail,
@@ -92,14 +92,10 @@ export const useAttachmentStore = defineStore("attachment", () => {
   };
 
   /**
-   * 触发文件选择器并暂存附件；原生实现由 capability 选择，HTML 是独立导入子路径。
+   * 触发文件选择器并暂存附件；Android 使用原生选择器，其他环境沿用 HTML 导入。
    */
   const handleAttachment = async (mode: 'camera' | 'gallery' | 'file' = 'file') => {
-    const platformStore = usePlatformStore();
-    if (mode === 'camera') platformStore.require('camera');
-    const nativePicker = platformStore.isImplemented(
-      mode === 'camera' ? 'camera' : mode === 'file' ? 'filePicker' : 'photoPicker',
-    );
+    if (mode === 'camera' && !isAndroid) return;
     
     // ==================================================================
     // Android 端主链路：原生插件拦截直传
@@ -108,7 +104,7 @@ export const useAttachmentStore = defineStore("attachment", () => {
     //   - Native 层流式拷贝到 cacheDir 并计算 SHA-256，最后通过
     //     register_local_file 零拷贝注册到附件目录
     // ==================================================================
-    if (nativePicker) {
+    if (isAndroid) {
       console.log(`[AttachmentStore] Using native picker. Mode: ${mode}`);
       const notificationStore = useNotificationStore();
       

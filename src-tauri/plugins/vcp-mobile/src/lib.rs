@@ -5,7 +5,8 @@ use tauri::{
 
 pub mod cli;
 pub mod events;
-pub mod ios;
+#[cfg(any(target_os = "ios", test))]
+mod ios;
 mod screen;
 pub mod stream;
 pub mod system;
@@ -22,7 +23,7 @@ fn ios_not_implemented<T>(operation: &str) -> Result<T, String> {
 
 #[cfg(target_os = "ios")]
 fn ios_unsupported<T>(operation: &str) -> Result<T, String> {
-    Err(format!("unsupported: {operation} is outside the current iOS capability set"))
+    Err(format!("unsupported: {operation} is not supported on iOS"))
 }
 
 /// Plugin state shared across commands
@@ -30,7 +31,7 @@ pub struct VcpMobileState<R: Runtime> {
     #[cfg(any(target_os = "android", target_os = "ios"))]
     plugin_handle: std::sync::Mutex<Option<tauri::plugin::PluginHandle<R>>>,
     #[cfg(target_os = "ios")]
-    ios_calls: ios::NativeCalls,
+    ios_event_registration: std::sync::Arc<std::sync::atomic::AtomicBool>,
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     _marker: std::marker::PhantomData<fn() -> R>,
 }
@@ -106,7 +107,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
                 #[cfg(any(target_os = "android", target_os = "ios"))]
                 plugin_handle: std::sync::Mutex::new(Some(plugin_handle)),
                 #[cfg(target_os = "ios")]
-                ios_calls: ios::NativeCalls::default(),
+                ios_event_registration: Default::default(),
                 #[cfg(not(any(target_os = "android", target_os = "ios")))]
                 _marker: std::marker::PhantomData,
             });

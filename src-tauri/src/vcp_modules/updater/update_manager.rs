@@ -4,7 +4,6 @@
 //! `vcp-update://status` 事件广播；前端不再向下载/安装命令传递 URL 或路径。
 
 use super::download::{self, DownloadAttempt};
-use crate::vcp_modules::infra::platform::{require_capability, CapabilityName};
 use reqwest::{redirect::Policy, Client, Url};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -25,6 +24,7 @@ const CHECKSUM_ASSET_SUFFIX: &str = "arm64-v8a.apk.sha256";
 const UPDATES_DIR_NAME: &str = "updates";
 const APK_FILENAME: &str = "update.apk";
 const APK_PART_FILENAME: &str = "update.apk.part";
+#[cfg(any(target_os = "android", test))]
 const INSTALLING_APK_PREFIX: &str = "installing-";
 #[cfg(any(target_os = "android", test))]
 const STALE_INSTALLER_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
@@ -51,6 +51,7 @@ pub enum UpdateState {
     Downloading,
     Verifying,
     ReadyToInstall,
+    #[allow(dead_code)] // Shared status DTO; only the Android installer enters this state.
     Installing,
     Failed,
 }
@@ -582,7 +583,6 @@ pub fn cleanup_legacy_frontend_ota(app: &AppHandle) {
 
 #[tauri::command]
 pub async fn get_update_status(session: State<'_, UpdateSession>) -> Result<UpdateStatus, String> {
-    require_capability(CapabilityName::ApkUpdate)?;
     Ok(session.snapshot().await)
 }
 
@@ -591,7 +591,6 @@ pub async fn check_for_update(
     app: AppHandle,
     session: State<'_, UpdateSession>,
 ) -> Result<UpdateStatus, String> {
-    require_capability(CapabilityName::ApkUpdate)?;
     transition(&app, &session, |inner| {
         inner.state = UpdateState::Checking;
         inner.error = None;
@@ -727,7 +726,6 @@ pub async fn start_update_download(
     app: AppHandle,
     session: State<'_, UpdateSession>,
 ) -> Result<UpdateStatus, String> {
-    require_capability(CapabilityName::ApkUpdate)?;
     let artifact = {
         let inner = session.inner.read().await;
         match inner.state {
@@ -949,7 +947,6 @@ pub async fn cancel_update_download(
     _app: AppHandle,
     session: State<'_, UpdateSession>,
 ) -> Result<UpdateStatus, String> {
-    require_capability(CapabilityName::ApkUpdate)?;
     let flag = session.inner.read().await.cancel.clone();
     if let Some(flag) = flag {
         flag.store(true, Ordering::Relaxed);
@@ -971,6 +968,7 @@ async fn transition_install_error(
     .await
 }
 
+#[cfg(any(target_os = "android", test))]
 async fn stage_installer_apk_in_updates(
     updates_dir: &Path,
     requested_path: &Path,
@@ -986,6 +984,7 @@ async fn stage_installer_apk_in_updates(
     Ok(staged)
 }
 
+#[cfg(any(target_os = "android", test))]
 async fn validate_installer_path_in_updates(
     updates_dir: &Path,
     requested_path: &Path,
@@ -1014,7 +1013,6 @@ pub async fn install_update(
     app: AppHandle,
     session: State<'_, UpdateSession>,
 ) -> Result<UpdateStatus, String> {
-    require_capability(CapabilityName::ApkUpdate)?;
     {
         let inner = session.inner.read().await;
         if inner.state != UpdateState::ReadyToInstall {
@@ -1025,19 +1023,30 @@ pub async fn install_update(
         .try_lock()
         .map_err(|_| "更新下载或安装正在进行".to_string())?;
 
-    transition(&app, &session, |inner| {
-        inner.state = UpdateState::Installing;
-        inner.error = None;
-    })
-    .await;
+    #[cfg(not(target_os = "android"))]
+    {
+        Ok(transition_install_error(
+            &app,
+            &session,
+            "当前平台没有 APK 安装器，请在应用外完成更新。".to_string(),
+            false,
+        )
+        .await)
+    }
 
-    let updates = updates_dir(&app)?;
-    let apk_path = updates.join(APK_FILENAME);
-
-    // 安装前置检查（仅 Android）。检查失败时保持 ReadyToInstall 并记录错误，
-    // 用户处理问题后可直接重试安装，无需重新下载。
     #[cfg(target_os = "android")]
     {
+        transition(&app, &session, |inner| {
+            inner.state = UpdateState::Installing;
+            inner.error = None;
+        })
+        .await;
+
+        let updates = updates_dir(&app)?;
+        let apk_path = updates.join(APK_FILENAME);
+
+        // 安装前置检查（仅 Android）。检查失败时保持 ReadyToInstall 并记录错误，
+        // 用户处理问题后可直接重试安装，无需重新下载。
         match tauri_plugin_vcp_mobile::system::can_install_packages(app.clone()) {
             Ok(true) => {}
             Ok(false) => {
@@ -1092,19 +1101,16 @@ pub async fn install_update(
                 return Ok(status);
             }
         }
-    }
 
-    let staged = match stage_installer_apk_in_updates(&updates, &apk_path).await {
-        Ok(staged) => staged,
-        Err(error) => {
-            let status = transition_install_error(&app, &session, error, true).await;
-            return Ok(status);
-        }
-    };
-    let staged_string = staged.to_string_lossy().to_string();
+        let staged = match stage_installer_apk_in_updates(&updates, &apk_path).await {
+            Ok(staged) => staged,
+            Err(error) => {
+                let status = transition_install_error(&app, &session, error, true).await;
+                return Ok(status);
+            }
+        };
+        let staged_string = staged.to_string_lossy().to_string();
 
-    #[cfg(target_os = "android")]
-    {
         let result = tauri_plugin_vcp_mobile::system::open_file_native(
             app.clone(),
             staged_string.clone(),
@@ -1115,38 +1121,15 @@ pub async fn install_update(
             let status = transition_install_error(&app, &session, error, true).await;
             return Ok(status);
         }
+
+        let status = transition(&app, &session, |inner| {
+            inner.state = UpdateState::Idle;
+            inner.error = None;
+            inner.downloaded.store(0, Ordering::Relaxed);
+        })
+        .await;
+        Ok(status)
     }
-
-    #[cfg(not(target_os = "android"))]
-    {
-        use tauri_plugin_opener::OpenerExt;
-
-        // 尝试用 opener 打开本地 APK 触发系统安装器
-        let result = app.opener().open_path(
-            &staged_string,
-            Some("application/vnd.android.package-archive"),
-        );
-
-        if let Err(error) = result {
-            remove_file_if_exists(&staged).await.ok();
-            let status = transition_install_error(
-                &app,
-                &session,
-                format!("无法启动安装器: {error}。建议前往 GitHub Release 页面手动下载安装。"),
-                true,
-            )
-            .await;
-            return Ok(status);
-        }
-    }
-
-    let status = transition(&app, &session, |inner| {
-        inner.state = UpdateState::Idle;
-        inner.error = None;
-        inner.downloaded.store(0, Ordering::Relaxed);
-    })
-    .await;
-    Ok(status)
 }
 
 #[cfg(test)]

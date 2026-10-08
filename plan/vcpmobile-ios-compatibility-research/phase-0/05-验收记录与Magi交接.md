@@ -1,6 +1,6 @@
 # Phase 0：验收记录与 Magi 交接
 
-> 日期：2026-10-08。阶段状态：**Phase 0 已完成，具备 Phase 1 开工输入**。Phase 1–6 尚未实施；本阶段没有 Apple 构建结果。
+> 原验收日期：2026-10-08，`4c6e25bb` 加当时工作树。**Phase 0 已完成**；当时 Phase 1–6 尚未实施。第 1–3 节保留原交付/执行记录，第 4 节于 2026-10-09 校准当前交接；不将旧结果描述为本轮复验。
 
 ## 1. 本阶段交付
 
@@ -35,17 +35,14 @@
 
 三方共同结论：Phase 0 用可复查输入和具体任务支持 Phase 1；原生附件和尽力后台仍是首产物范围。争议细项见 04 §4。规范名称按研究 01 的用户既定更名决定统一，不再沿用最初审查中保留旧名称的建议。
 
-## 4. 剩余问题与下一步
+## 4. 2026-10-09 剩余问题与下一步
 
 | 优先级/归属 | 具体动作 | 闭环位置 |
 |---|---|---|
-| Phase 1 先行 | 由现有启动 owner 读取 typed capability，列清 PermissionGate/Updater/Root/CLI/Distributed/语音/附件各消费者 | 04 的核心路径表；在 phase-1 重新细化文件级子规划 |
-| Phase 1 | 分拆 Android/iOS/host cfg、main/portal ACL、目录与 lifecycle DTO；保留 Android 既有数据根 | 02 命令矩阵与 03 DEP-01 |
-| Phase 1 | 手动 Sync 的 battery 前置检查和 app `set_keepalive_mode` 单独审计；完整遥测延期不能自动推出删除最小业务条件 | 02 的人工消费者结论与真实调用方 |
-| Phase 2/G1 | product/binding/selector/Channel、SwiftPM revision、tao Scene gate、取消桥接、minimum 与可重放 overlay | 03 DEP-02–06/08–10；G1 编译诊断 |
-| Phase 3/4 | SQLite 临时目录/锁、Sync 终态、staging/取消/像素预算、WebKit 与输入差异 | 03 DEP-07/11、04 逐路径交接 |
-| Phase 5/6 | continued-task 进度/单次终态、最终 ID 与签名输入、G2 archive/包检查 | 上位 04/06/07、各阶段新子规划 |
+| 已完成/已替代 | cfg/ACL、目录、lifecycle DTO 已实施；旧 typed capability 又已被 plugin-os 同步身份替代 | Phase 1 历史记录与 Phase 2 当前平台简化，勿重复构建四轴表 |
+| Phase 2/G1 | Swift/Channel、单 Scene、minimum 和可重放输入已有源码；Apple 编译/链接仍待取得 | 03 更新后的 DEP-02–06/08–10；真实 G1 诊断 |
+| Phase 3 | SQLite/Sync/LAN 及业务收尾；共同权限、本 App 通知、电量/空间/网络和 Distributed | 最新 Phase 3 README；字段缺失、授权偏好和实际执行结果分开 |
+| Phase 4 | 原生文件/媒体、拍照/相册、双向分享、staging/像素预算、WebKit 缓存与输入 | 最新 Phase 4 README；不继续执行旧分享/相机/相册延期 |
+| Phase 5/6 | SSE 后台持续接收专项、其余尽力后台、进度/终态、最终 ID/签名与 G2 产物 | 主线 04/06/07 与 Phase 5/6；候选方案不当作已有效实现 |
 
-没有把上述后续施工记作本阶段完成。具体 API 或 G1 输入仍需跟进的项目不会阻断无依赖的 Phase 1 工作。
-
-下一项工作在 [phase-1](../phase-1/README.md) 展开：先形成平台能力/cfg/ACL/目录/DTO 的文件级子规划，然后按真实消费者实施。iOS `15.0` 已作为工程输入确定，生产配置仍待 Phase 2 写入。
+没有把后续施工记作 Phase 0 成果。minimum 15.0 已由 Phase 2 写入配置；现阶段不再以“尚无 Swift/配置”或“先建立能力表”排任务。源码工作继续按 [当前 Phase 2](../phase-2/README.md) 与 Phase 3–6 的依赖推进；G1/G2 仍未取得 Apple 结果。

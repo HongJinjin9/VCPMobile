@@ -1,8 +1,8 @@
 # 06. 安全、隐私与用户自签产物
 
-> 2026-10-07 修订：沿用 D8/D13 的实验性未签名产物路线，明确设备构建、包结构和用户签名输入。
+> 2026-10-09 修订：沿用 D8/D13 的实验性未签名产物路线，将已批准的系统功能、分享扩展与后台专项纳入声明和用户签名输入；不扩大正式签名或付费 Team 范围。
 
-## 2026-10-07 当前安全与分发裁决
+## 当前分发范围与工程输入
 
 ### 产物路线
 
@@ -37,51 +37,51 @@ Apple [TN3125](https://developer.apple.com/documentation/technotes/tn3125-inside
 
 - CI 候选 Bundle ID 为 `com.vcp.avatar`；沿用 D13，用户签名时可以改写。
 - 改写 `CFBundleIdentifier` 与 `BGTaskSchedulerPermittedIdentifiers` 后，选择或生成匹配最终 App ID 的 profile，并按其授权设置 application-identifier、team/keychain 等 entitlement；profile 本身由 Apple 签发。Swift 从 `Bundle.main.bundleIdentifier` 构造 runtime task ID，并校验与 plist 一致。
+- incoming share 已获批准：P4-4 确定扩展 target 与主 App 交接方式后，将扩展 Bundle ID、共享容器/App Group 以及各 target 的签名输入加入同一改写说明。先核对用户自签可提供的 profile 条件，不假定只有主 App 改 ID 就足够，也不自动要求项目购入付费 Team。
 - Info.plist 留旧 task 前缀而只改 runtime ID，会导致注册/提交不匹配；把该情形列入打包检查与用户说明。
-- minimumSystemVersion 显式配置，当前候选 `15.0`；根据锁定框架和实际采用 API 的 deployment target 要求确定。iOS 26 continued API 使用 availability 分支。
+- minimumSystemVersion 已显式采用 `15.0` 工程基线，G1 Apple 编译结果尚未取得；新增 API 继续核对 deployment target。iOS 26 continued API 使用 availability 分支。
 - 版本保持与 `package.json` / `Cargo.toml` 一致，build version 单独由产物脚本生成并检查格式。
 - Xcode/SDK 组合从 runner 实际库存选择，记录路径与版本；框架 Scene 适配随该组合核对。
 
-### 当前安全接入任务
+### 当前工程事实与后续事项
 
-1. `capabilities/default.json` 对 main 与 `vcp-portal-*` 授权 `vcp-mobile:allow-all`，且无平台限制；
+1. app 的 Tauri capability 已按平台区分，实际生产窗口为 `main`，未授予旧 portal 或 `vcp-mobile:allow-all`；新增插件调用按消费者配置；
 2. `tauri.conf.json` 仍为 `csp: null`、asset protocol scope `["**"]`；
-3. iOS 会落入假权限、假设备数据和空成功；
-4. Android APK updater 在共同 UI/Rust owner 中全平台可达；
-5. API key、sync token、admin/distributed secrets 仍整体序列化进 SQLite settings 并返回前端；
-6. Distributed 原生工具可让远程 Agent 触达 clipboard、notification、location/telemetry；
-7. `.gitignore` 尚无 `*.p12`、`*.p8`、`*.mobileprovision` 等 Apple secret 防护。
+3. Android/iOS/host 插件分支已分开，iOS 未接通的 adapter 返回错误，不消费 host fixture；
+4. 共享 Vue 使用同步平台身份处理普通差异；iOS 更新/Root/语音入口给出说明，APK 自动流程只由 Android 启动；原四字段能力表及统一静态门禁已经移除；
+5. API key、sync token、admin/distributed secrets 仍整体序列化进 SQLite settings 并返回前端；这是当前存储事实，本轮没有批准另建 Keychain 或密钥 owner；
+6. Distributed 已获批兼容，继续复用逐工具显式授权与执行 owner；clipboard、notification、location/telemetry 分别消费真实原生结果；
+7. `.gitignore` 已覆盖 `*.p12`、`*.p8`、`*.mobileprovision`，本项目不收集用户签名凭据。
 
 与当前适配直接相关的改动：
 
-- Android/iOS capability 按消费者列举，portal 按自身用途授权；
-- Updater、Root、helper、listener、install、CLI/PTY 按平台归属接到 Rust owner 和 UI；
+- Android/iOS 的 Tauri 命令授权随实际前端消费者接入；Rust 内部接口无需另公开给 Vue；
+- 入口呈现由 Vue 的局部平台分支处理，Rust/Swift/Kotlin 按具体操作完成，不为潜在绕过另建统一平台门禁；
 - host scaffold 与 iOS adapter 使用各自 cfg；
-- Apple 凭据加入 ignore，unsigned CI 使用只读仓库权限；
-- CSP/asset scope 的改动按真实资源流收敛，保留消息 DOM、受控 HTML 和附件渲染；
-- SQLite 中敏感配置的 Keychain/受保护 owner 迁移作为既有 P1 问题单独评估，列出读取方、备份/登出与迁移路径。
+- unsigned CI 使用只读仓库权限，签名材料保留在用户自己的签名环境；
+- 已有消息 DOM、受控 HTML 和附件资源继续复用；本轮不把 CSP/asset scope 收敛或 Keychain 迁移加入实施任务。若具体已批准功能确实受现有配置影响，先定位该调用链，再处理必要差异。
 
 ### Info.plist 与 entitlement 纪律
 
 每项平台声明对应一个已规划功能及调用者，记录声明到代码的映射。
 
-首期核心：
+随对应阶段接入的声明（当前 `Info.ios.plist` 仅包含 Scene 配置，以下不表示已经实现）：
 
-- `NSLocalNetworkUsageDescription`（D7 用户 LAN 服务）；
+- `NSLocalNetworkUsageDescription`（P3-1 的用户 LAN 服务）；
 - 收窄的 `NSAllowsLocalNetworking`（只影响对应 Apple URL Loading System 场景）；
 - 显式 minimum system；
-- continued task 的 permitted identifiers 与 processing mode，按 04 实现。
+- continued task 的 permitted identifiers 与 processing mode，按 P5-3 实现；P5-1 若选择其他保活手段，依据实际 API 条件添加对应声明，不能先把某后台模式写入配置就视为连续接收已经成立。
 
 条件项：
 
-- Camera/Microphone/Photo add-only/Location/Motion 的 usage description；
-- Share Extension 才加 App Group 和第二 Bundle ID/profile；
-- APNs 才加 `aps-environment`；
+- Camera/Photo add-only 在 P4-2、Location/Motion 在 P3-4/P3-5 根据实际访问接入用途说明；语音仍未开发，不预先添加麦克风请求；
+- Share Extension 的嵌套代码、Bundle ID/profile 及实际需要的 App Group 在 P4-4 确定，P6 验证最终签名输入；
+- 本 App 系统通知在 P3-3 实施，授权请求与通知响应按真实 API 接入；只有另行批准 APNs 时才加入其服务端、profile 和 `aps-environment`；
 - 普通 TCP LAN 使用用途说明，Bonjour/multicast 随对应发现/多播功能声明；
 - Document Picker 的 security-scoped 访问与应用自己的 iCloud container 分别按功能配置；
 - 当前 Chat 使用网络/CPU，后台 GPU 等资源随真实计算需求另行声明。
 
-每项功能分别填写签名 entitlement、Info.plist 描述和运行时授权结果，三者与调用链一起检查。
+每项功能按实际需要记录签名 entitlement、Info.plist 描述和运行时授权结果；有 API 不等于都需要这三种声明。共同权限引导消费各功能真实状态，不复制 Android 系统权限列表。
 
 ### PrivacyInfo.xcprivacy
 
@@ -117,4 +117,4 @@ Apple [TN3125](https://developer.apple.com/documentation/technotes/tn3125-inside
 - 相应渠道的功能与 release-build 检查；
 - App Review 对完整性、Android 文案、下载代码、远程原生工具和后台模式的审查。
 
-当前交付说明写明产物版本、目标系统、包结构、用户签名步骤和具体已知问题，供使用者按所选签名环境处理。
+当前交付说明写明产物版本、目标系统、包结构、用户签名步骤和具体已知问题，供使用者按所选签名环境处理。P6 包检查须包含 P4-4 的分享扩展及最终 ID 配套、P3 的已接入权限/通知/设备声明和 P5 实际采用的后台输入；本轮仅安排这些任务，不修改或触发发布流程。
