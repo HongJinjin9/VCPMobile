@@ -394,6 +394,7 @@ export interface StreamEventDto {
   blocks: ContentBlock[] | null;
   timestamp: number | null;
   topicUpdatedAt: number | null;
+  consumerRevision: number;
 }
 
 export interface MessageWriteResultDto {
@@ -417,7 +418,7 @@ export interface ActiveGenerationDto {
 }
 
 export type RecoveryResultDto =
-  | { status: "already_running" }
+  | { status: "attached" }
   | { status: "completed"; content: string; finishReason?: string | null }
   | { status: "failed" | "not_found"; content: string };
 

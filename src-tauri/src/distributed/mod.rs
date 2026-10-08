@@ -18,6 +18,9 @@ use tokio::sync::RwLock;
 
 /// Managed state for the distributed node. Registered via app.manage() in lib.rs.
 pub struct DistributedState {
+    /// Serializes settings reconciliation with lifecycle suspension.
+    /// Lock order: Settings runtime reconciliation -> this lock -> client lifecycle.
+    pub(crate) reconciliation: tokio::sync::Mutex<()>,
     pub client: RwLock<DistributedClient>,
     pub registry: Arc<tool_registry::ToolRegistry>,
     pub telemetry: Arc<telemetry_center::TelemetryCenter>,
@@ -27,6 +30,7 @@ impl DistributedState {
     pub fn new() -> Self {
         let registry = Arc::new(tools::build_registry());
         Self {
+            reconciliation: tokio::sync::Mutex::new(()),
             client: RwLock::new(DistributedClient::new()),
             registry,
             telemetry: Arc::new(telemetry_center::TelemetryCenter::new()),

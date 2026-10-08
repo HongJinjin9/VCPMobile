@@ -42,6 +42,106 @@ describe("chat conversation concurrency guards", () => {
     mockInvoke("get_active_generations", () => []);
   });
 
+  it.each(["response", "rejection"])("keeps the durable cancellation end ahead of a late recovery %s", async outcome => {
+    const recovery = deferred<any>();
+    let output: { emit: (event: unknown) => void } | undefined;
+    mockInvoke("get_active_generations", () => [{
+      msgId: "cancelled", topicId: "topic-a", ownerId: "agent-a", ownerType: "agent", createdAt: 1,
+    }]);
+    mockInvoke("recover_active_generation", args => {
+      output = args?.streamChannel as typeof output;
+      return recovery.promise;
+    });
+    const stream = useChatStreamStore();
+    await stream.checkAndRecoverInterruptedStreams();
+    output?.emit({
+      type: "end", messageId: "cancelled", consumerRevision: 100,
+      context: { ownerId: "agent-a", ownerType: "agent", topicId: "topic-a" },
+      content: "partial\n\n> VCP流式错误: 请求已中止", finishReason: "cancelled_by_user", blocks: [],
+    });
+    if (outcome === "response") recovery.resolve({ status: "completed", content: "partial" });
+    else recovery.reject(new Error("late command delivery failure"));
+    await flushPromises();
+    const message = stream.getActiveStreamMessage("agent-a", "agent", "topic-a", "cancelled");
+    expect(message?.content).toBe("partial\n\n> VCP流式错误: 请求已中止");
+    expect(message?.finishReason).toBe("cancelled_by_user");
+    expect(stream.isMessageActive("agent-a", "agent", "topic-a", "cancelled")).toBe(false);
+  });
+
+  it("receives a group's next speaker after an empty scan and a later conversation selection", async () => {
+    let output: { emit: (event: unknown) => void } | undefined;
+    mockInvoke("get_active_generations", args => {
+      output = args?.streamChannel as typeof output;
+      return [];
+    });
+    mockInvoke("load_chat_history", () => []);
+    const stream = useChatStreamStore();
+    await stream.checkAndRecoverInterruptedStreams();
+    const session = useChatSessionStore();
+    session.setConversation({ id: "group-a", type: "group" }, "topic-a");
+    const history = useChatHistoryStore();
+    await history.loadHistory("group-a", "group", "topic-a");
+    output?.emit({
+      type: "thinking", messageId: "other-owner", consumerRevision: 101,
+      context: { ownerId: "group-b", ownerType: "group", topicId: "topic-a" },
+    });
+    output?.emit({
+      type: "thinking", messageId: "next-speaker", consumerRevision: 102,
+      context: { ownerId: "group-a", ownerType: "group", topicId: "topic-a", agentId: "speaker" },
+    });
+    await flushPromises();
+    expect(history.currentChatHistory.map(message => message.id)).toEqual(["next-speaker"]);
+    expect(stream.isMessageActive("group-a", "group", "topic-a", "next-speaker")).toBe(true);
+  });
+
+  it("reuses the loaded message when the live snapshot arrives before the scan reply", async () => {
+    const session = useChatSessionStore();
+    session.setConversation({ id: "agent-a", type: "agent" }, "topic-a");
+    mockInvoke("load_chat_history", () => [{
+      id: "live", role: "assistant", content: "", timestamp: 1, blocks: [],
+    }]);
+    const history = useChatHistoryStore();
+    await history.loadHistory("agent-a", "agent", "topic-a");
+    const visibleMessage = history.currentChatHistory[0];
+    mockInvoke("get_active_generations", args => {
+      const output = args?.streamChannel as { emit: (event: unknown) => void };
+      output.emit({
+        type: "aurora", messageId: "live", consumerRevision: 111,
+        context: { ownerId: "agent-a", ownerType: "agent", topicId: "topic-a" },
+        aurora: { kind: "snapshot", streamId: 50, content: "live partial", stableBlocks: [] },
+      });
+      return [{ msgId: "live", ownerId: "agent-a", ownerType: "agent", topicId: "topic-a", createdAt: 1 }];
+    });
+    mockInvoke("recover_active_generation", () => ({ status: "attached" }));
+    const stream = useChatStreamStore();
+    await stream.checkAndRecoverInterruptedStreams();
+    await new Promise<void>(resolve => window.setTimeout(resolve, 0));
+    expect(stream.getActiveStreamMessage("agent-a", "agent", "topic-a", "live")).toBe(visibleMessage);
+    expect(history.currentChatHistory).toHaveLength(1);
+    expect(visibleMessage.content).toBe("live partial");
+  });
+
+  it("does not reactivate a stale scan row after its durable end arrived", async () => {
+    const scan = deferred<any[]>();
+    let output: { emit: (event: unknown) => void } | undefined;
+    mockInvoke("get_active_generations", args => {
+      output = args?.streamChannel as typeof output;
+      return scan.promise;
+    });
+    const stream = useChatStreamStore();
+    const scanning = stream.checkAndRecoverInterruptedStreams();
+    output?.emit({
+      type: "end", messageId: "finished-during-scan", consumerRevision: 120,
+      context: { ownerId: "agent-a", ownerType: "agent", topicId: "topic-a" },
+      content: "committed", finishReason: "completed", blocks: [],
+    });
+    scan.resolve([{ msgId: "finished-during-scan", ownerId: "agent-a", ownerType: "agent", topicId: "topic-a", createdAt: 1 }]);
+    await scanning;
+    expect(invokeMock.mock.calls.some(([command]) => command === "recover_active_generation")).toBe(false);
+    expect(stream.isMessageActive("agent-a", "agent", "topic-a", "finished-during-scan")).toBe(false);
+    expect(stream.getActiveStreamMessage("agent-a", "agent", "topic-a", "finished-during-scan")?.isReconnecting).toBe(false);
+  });
+
   it("invalidates an A snapshot even when selection later returns to A", () => {
     const session = useChatSessionStore();
     session.setConversation({ id: "agent-a", type: "agent" }, "topic-a");
@@ -271,6 +371,7 @@ describe("chat conversation concurrency guards", () => {
   it("does not persist a frontend skeleton for a thinking event", async () => {
     const stream = useChatStreamStore();
     await stream.processStreamEvent({
+      consumerRevision: 1,
       type: "thinking",
       chunk: null,
       messageId: "assistant-1",
@@ -300,6 +401,7 @@ describe("chat conversation concurrency guards", () => {
     const stream = useChatStreamStore();
     session.setConversation({ id: "agent-a", type: "agent" }, "topic-a");
     await stream.processStreamEvent({
+      consumerRevision: 1,
       type: "thinking",
       chunk: null,
       messageId: "assistant-a",
@@ -328,6 +430,7 @@ describe("chat conversation concurrency guards", () => {
 
     session.setConversation({ id: "agent-b", type: "agent" }, "topic-b");
     await stream.processStreamEvent({
+      consumerRevision: 1,
       type: "thinking",
       chunk: null,
       messageId: "assistant-b",
@@ -360,6 +463,7 @@ describe("chat conversation concurrency guards", () => {
     ).toBe(true);
 
     await stream.processStreamEvent({
+      consumerRevision: 1,
       type: "end",
       chunk: null,
       messageId: "assistant-a",
@@ -440,12 +544,14 @@ describe("chat conversation concurrency guards", () => {
       mockInvoke("recover_active_generation", (args) => {
         recoveryChannel = args?.streamChannel as typeof recoveryChannel;
         recoveryChannel?.emit({
+          consumerRevision: 1,
           type: "end",
           messageId: "assistant-offline-finalizing",
           turnAttempt: "attempt-offline",
           stepIndex: 2,
           projectionReset: false,
           finishReason: "completed",
+          content: "durable offline result",
           blocks: [],
           context: {
             ownerId: "agent-a",
@@ -484,6 +590,7 @@ describe("chat conversation concurrency guards", () => {
       ).toBe(false);
 
       recoveryChannel?.emit({
+        consumerRevision: 1,
         type: "thinking",
         messageId: "assistant-offline-finalizing",
         turnAttempt: "attempt-offline",

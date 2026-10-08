@@ -15,8 +15,17 @@ lazy_static::lazy_static! {
     static ref INFO_CONNECTION_ACTIVE: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
     static ref METADATA_LIST: Arc<RwLock<VecDeque<Value>>> = Arc::new(RwLock::new(VecDeque::new()));
     static ref COMPRESSED_PAYLOADS: Arc<RwLock<HashMap<String, Vec<u8>>>> = Arc::new(RwLock::new(HashMap::new()));
-    static ref WS_INFO_URL_CHANNEL: (watch::Sender<Option<Url>>, watch::Receiver<Option<Url>>) = watch::channel(None);
+    static ref WS_INFO_URL_CHANNEL: (watch::Sender<(u64, Option<Url>)>, watch::Receiver<(u64, Option<Url>)>) = watch::channel((0, None));
     static ref CURRENT_INFO_STATUS: Arc<RwLock<String>> = Arc::new(RwLock::new("closed".to_string()));
+}
+
+fn set_info_url(url: Option<Url>) {
+    WS_INFO_URL_CHANNEL.0.send_if_modified(|current| {
+        if current.1 == url { return false; }
+        current.0 = current.0.wrapping_add(1);
+        current.1 = url;
+        true
+    });
 }
 
 fn emit_info_event<R: tauri::Runtime>(app: &AppHandle<R>, payload: serde_json::Value) {
@@ -112,15 +121,20 @@ pub async fn init_vcp_info_connection_internal<R: tauri::Runtime>(
     url: String,
     key: String,
 ) -> Result<(), String> {
+    #[cfg(target_os = "ios")]
+    if !crate::vcp_modules::lifecycle_manager::is_app_in_foreground(&app) {
+        set_info_url(None);
+        return Ok(());
+    }
     if url.trim().is_empty() || key.trim().is_empty() {
-        let _ = WS_INFO_URL_CHANNEL.0.send(None);
+        set_info_url(None);
         return Ok(());
     }
 
     let ws_url = parse_info_url(&url, &key)?;
 
     // 存入 watch channel 供监听器线程消费
-    let _ = WS_INFO_URL_CHANNEL.0.send(Some(ws_url));
+    set_info_url(Some(ws_url));
 
     if INFO_CONNECTION_ACTIVE.swap(true, Ordering::SeqCst) {
         return Ok(());
@@ -139,11 +153,12 @@ async fn start_vcp_info_listener<R: tauri::Runtime>(app_handle: AppHandle<R>) {
     let mut retry_delay = Duration::from_millis(1000);
 
     loop {
-        let ws_url = {
+        let (connection_revision, ws_url) = {
             let val = url_rx.borrow().clone();
             match val {
-                Some(u) => u,
-                None => {
+                (revision, Some(url)) => (revision, url),
+                (_, None) => {
+                    *CURRENT_INFO_STATUS.write().await = "closed".to_string();
                     if url_rx.changed().await.is_err() {
                         break;
                     }
@@ -233,6 +248,7 @@ async fn start_vcp_info_listener<R: tauri::Runtime>(app_handle: AppHandle<R>) {
         let connect_fut = connect_async(request);
 
         tokio::select! {
+            biased;
             _ = url_rx.changed() => {
                 log::info!("[VCPInfo] URL changed during connection attempt, aborting.");
                 interrupted_by_url_change = true;
@@ -283,6 +299,7 @@ async fn start_vcp_info_listener<R: tauri::Runtime>(app_handle: AppHandle<R>) {
 
         if connection_succeeded {
             if let Some(ws_stream) = ws_stream_opt {
+                if url_rx.borrow().0 != connection_revision { continue; }
                 retry_delay = Duration::from_millis(1000);
                 {
                     *CURRENT_INFO_STATUS.write().await = "connected".to_string();
@@ -303,26 +320,23 @@ async fn start_vcp_info_listener<R: tauri::Runtime>(app_handle: AppHandle<R>) {
 
                 let mut heartbeat_timer = Box::pin(sleep(Duration::from_secs(15)));
 
+                let mut configuration_changed = false;
                 loop {
                     tokio::select! {
+                    biased;
                     // 监听 URL 变更并防止 Flapping 瞬断
-                    _ = url_rx.changed() => {
-                        let new_val = url_rx.borrow().clone();
-                        if let Some(new_u) = new_val {
-                            if new_u != ws_url {
-                                log::info!("[VCPInfo] URL changed, closing current connection.");
-                                break;
-                            } else {
-                                log::info!("[VCPInfo] URL changed event fired but value is identical. Ignoring to prevent flapping.");
-                            }
-                        } else {
-                            log::info!("[VCPInfo] URL cleared, closing connection.");
+                    changed = url_rx.changed() => {
+                        if changed.is_err() || url_rx.borrow().0 != connection_revision {
+                            log::info!("[VCPInfo] Connection intent changed, closing socket.");
+                            configuration_changed = true;
                             break;
                         }
                     }
                         // 心跳周期触发
                         _ = &mut heartbeat_timer => {
-                            if let Err(e) = ws_write.send(Message::Ping(vec![].into())).await {
+                            if let Err(e) = tokio::time::timeout(Duration::from_secs(5), ws_write.send(Message::Ping(vec![].into())))
+                                .await.map_err(|_| "WebSocket ping timed out".to_string())
+                                .and_then(|result| result.map_err(|error| error.to_string())) {
                                 log::error!("[VCPInfo] Failed to send Ping: {}", e);
                                 break;
                             }
@@ -366,6 +380,9 @@ async fn start_vcp_info_listener<R: tauri::Runtime>(app_handle: AppHandle<R>) {
                         "source": "VCPInfo"
                     }),
                 );
+                if configuration_changed {
+                    continue;
+                }
             }
         }
 

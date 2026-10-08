@@ -6,6 +6,11 @@
   "platforms": ["iOS"],
   "permissions": [
     "core:default",
-    "opener:default"
+    "opener:default",
+    "vcp-mobile:allow-get-notification-permission",
+    "vcp-mobile:allow-request-notification-permission",
+    "vcp-mobile:allow-open-notification-settings",
+    "vcp-mobile:allow-get-pending-notification",
+    "vcp-mobile:allow-get-battery-status"
   ]
 }

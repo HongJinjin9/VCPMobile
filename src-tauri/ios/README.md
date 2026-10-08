@@ -19,13 +19,15 @@ G1 执行真实编译、链接和归档，保留输出供人工分析；没有�
 
 | 文件 | 所有权 |
 |---|---|
-| `../tauri.ios.conf.json` | iOS 15.0、Network framework；不覆盖 Android 配置 |
-| `../Info.ios.plist` | 单 Scene manifest，消费官方 tao 0.37.1 的 Scene 修复；Tauri build 自动合并 |
+| `../tauri.ios.conf.json` | 最低 iOS/iPadOS 26.0，以及 Network/UserNotifications/CoreMotion/CoreLocation framework；不覆盖 Android 配置，Metal 由锁定 CLI 模板提供 |
+| `../Info.ios.plist` | 单 Scene manifest、LAN/定位/运动用途；Tauri build 自动合并 |
 | `g1-inputs.json` | 选择 Xcode 的路径、XcodeGen 下载地址和下载完整性摘要 |
-| `PrivacyInfo.xcprivacy` | 当前文件元数据和计时 API 的 required reasons；后续原生 API/数据使用变化需重新审计 |
+| `PrivacyInfo.xcprivacy` | 文件元数据、计时和本机磁盘容量展示的 required reasons；后续原生 API/数据使用变化需按真实用途核对 |
 | `scripts/g1.py` | 重放工程、真实 G1 构建、归档收集及原始诊断 |
 
 Swift plugin 的源文件仍归 `../plugins/vcp-mobile/ios/`。构建直接使用 Tauri/SwiftPM 的正常依赖流程，不拦截 `swift`，不维护构建包白名单，不向 registry 预置或改写 lock。Cargo/pnpm 的正常锁文件和 VCP Swift manifest 的依赖约束继续生效。
+
+最低运行版本由用户确定为 26.0；本项目 Swift manifest 同步使用 `.iOS("26.0")`，保留原有 Swift tools 版本。G1 的 `IPHONEOS_DEPLOYMENT_TARGET` 直接读取 Tauri 配置，Xcode 仍由 `g1-inputs.json` 单独选择；提高最低版本不等于已经取得 Apple 构建结果。
 
 Rust `swift-rs` 与 SwiftPM `SwiftRs` 是独立依赖。各 Swift root 按自己的 manifest 和原有 lock 解析；不再宣称所有 root 被额外脚本统一到同一 revision。解析、编译或链接出现具体错误时，根据真实构建输出处理。
 

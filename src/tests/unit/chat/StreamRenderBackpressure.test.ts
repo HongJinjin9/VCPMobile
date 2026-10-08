@@ -7,6 +7,7 @@ import type { MarkdownNode, StreamEventDto } from "@/core/types/chat";
 const streamEvent = (
   event: Pick<StreamEventDto, "type" | "messageId"> & Partial<StreamEventDto>,
 ): StreamEventDto => ({
+  consumerRevision: 1,
   chunk: null,
   context: null,
   finishReason: null,
@@ -126,6 +127,47 @@ describe("stream render backpressure", () => {
         tailSnapshot,
       };
     });
+  });
+
+  it("rejects old-consumer plain deltas and terminals after a replacement snapshot", async () => {
+    const raf = installManualRaf();
+    try {
+      const store = useChatStreamStore();
+      await store.processStreamEvent(streamEvent({
+        type: "aurora", messageId: "assistant-1", context: streamContext,
+        consumerRevision: 10,
+        aurora: { kind: "delta", streamId: 40, chunk: "old pending" },
+      }));
+      await store.processStreamEvent(streamEvent({
+        type: "aurora", messageId: "assistant-1", context: streamContext,
+        consumerRevision: 11,
+        aurora: {
+          kind: "snapshot", streamId: 40, content: "<think>current",
+          stableBlocks: [], tailMode: "plain",
+          tailBlock: { type: "thought", content: "current", hash: "current", theme: "default", is_complete: false },
+        },
+      }));
+      await store.processStreamEvent(streamEvent({
+        type: "aurora", messageId: "assistant-1", context: streamContext,
+        consumerRevision: 10,
+        aurora: { kind: "delta", streamId: 40, chunk: "old late" },
+      }));
+      await store.processStreamEvent(streamEvent({
+        type: "end", messageId: "assistant-1", context: streamContext,
+        consumerRevision: 10, content: "old terminal", finishReason: "completed", blocks: [],
+      }));
+      await store.processStreamEvent(streamEvent({
+        type: "error", messageId: "assistant-1", context: streamContext,
+        consumerRevision: 10, content: "old failure", error: "old consumer",
+      }));
+      raf.flush();
+      const message = store.getActiveStreamMessage("agent-a", "agent", "topic-a", "assistant-1");
+      expect(message?.content).toBe("<think>current");
+      expect(message?.isReconnecting).toBe(false);
+      expect(store.isMessageActive("agent-a", "agent", "topic-a", "assistant-1")).toBe(true);
+    } finally {
+      raf.restore();
+    }
   });
 
   it("accepts a warm baseline from a newer stream and rebases its lower frame sequence", async () => {

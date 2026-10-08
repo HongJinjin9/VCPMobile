@@ -16,13 +16,15 @@ export interface DiskSpaceDto {
   freeGb: number;
   totalBytes: number;
   totalGb: number;
+  volume?: string;
 }
 
 export interface BatteryStatusDto {
-  level: number;
+  level: number | null;
   isPowerSaveMode: boolean;
   status: string | null;
   temperature: number | null;
+  unavailable?: Record<string, string>;
 }
 
 export interface NativeFileStartDetail {

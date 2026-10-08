@@ -69,23 +69,29 @@ describe("sync session ownership", () => {
     mockInvoke("batch_get_avatars", () => []);
   });
 
-  it("keeps a missing iOS battery adapter explicit and preserves warning-and-continue sync", async () => {
+  it("preserves an unknown native iOS battery level without inventing a successful check", async () => {
     testPlatform.value = 'ios';
+    mockInvoke('plugin:vcp-mobile|get_battery_status', () => ({
+      level: null, isPowerSaveMode: false, unavailable: { level: 'not available' },
+    }));
     const store = useSyncSessionStore();
     store.open();
     await store.startSync();
-    expect(invokeMock.mock.calls.some(([command]) => command === 'plugin:vcp-mobile|get_battery_status')).toBe(false);
+    expect(invokeMock.mock.calls.some(([command]) => command === 'plugin:vcp-mobile|get_battery_status')).toBe(true);
     expect(invokeMock.mock.calls.some(([command]) => command === 'start_manual_sync')).toBe(true);
-    expect(store.logs.some(log => log.message.includes('无法确认设备状态'))).toBe(true);
+    expect(store.logs.some(log => log.message.includes('无法确认当前电量'))).toBe(true);
     expect(store.logs.some(log => log.message === '设备状态检查完成')).toBe(false);
     emitTauriEvent('vcp-sync-status', { sessionId: 1, status: 'error', error: syncError('END') });
     await store.close();
   });
 
   it.each([
-    { level: 20, isPowerSaveMode: false, code: 'BATTERY_TOO_LOW' },
-    { level: 80, isPowerSaveMode: true, code: 'POWER_SAVE_MODE' },
-  ])("preserves the Android battery safeguard ($code)", async ({ level, isPowerSaveMode, code }) => {
+    { platform: 'android', level: 20, isPowerSaveMode: false, code: 'BATTERY_TOO_LOW' },
+    { platform: 'android', level: 80, isPowerSaveMode: true, code: 'POWER_SAVE_MODE' },
+    { platform: 'ios', level: 0, isPowerSaveMode: false, code: 'BATTERY_TOO_LOW' },
+    { platform: 'ios', level: null, isPowerSaveMode: true, code: 'POWER_SAVE_MODE' },
+  ] as const)("uses observed battery state on $platform ($code)", async ({ platform, level, isPowerSaveMode, code }) => {
+    testPlatform.value = platform;
     mockInvoke('plugin:vcp-mobile|get_battery_status', () => ({ level, isPowerSaveMode }));
     const store = useSyncSessionStore();
     store.open();
@@ -117,6 +123,67 @@ describe("sync session ownership", () => {
     );
     await Promise.resolve();
     unlisteners.forEach((unlisten) => expect(unlisten).toHaveBeenCalledOnce());
+  });
+
+  it("waits for an older close receipt before starting from a reopened panel", async () => {
+    let nextSession = 0;
+    mockInvoke('start_manual_sync', () => ++nextSession);
+    const stop = deferred<void>();
+    mockInvoke('stop_sync', () => stop.promise);
+    const store = useSyncSessionStore();
+    store.open();
+    await store.startSync();
+    emitTauriEvent('vcp-sync-status', { sessionId: 1, status: 'error', error: syncError('END') });
+
+    const closing = store.close();
+    store.open();
+    const restarting = store.startSync();
+    await Promise.resolve();
+    expect(nextSession).toBe(1);
+    expect(invokeMock.mock.calls.filter(([command]) => command === 'stop_sync')).toHaveLength(1);
+    stop.resolve();
+    await Promise.all([closing, restarting]);
+
+    expect(nextSession).toBe(2);
+    expect(store.activeSessionId).toBe(2);
+  });
+
+  it("retains the reload requirement across STOP_PENDING and consumes it only after real shutdown", async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let nextSession = 0;
+    let drainFinished = false;
+    let reloads = 0;
+    mockInvoke('start_manual_sync', () => ++nextSession);
+    mockInvoke('get_assistants_snapshot', () => {
+      reloads += 1;
+      return { agents: [], groups: [], unreadCounts: {} };
+    });
+    mockInvoke('stop_sync', async () => {
+      if (!drainFinished) throw `SYNC_ERROR:${JSON.stringify({
+        ...syncError('SYNC_STOP_PENDING', '同步仍在收尾'),
+        origin: 'mobile_sync', stage: 'shutdown', category: 'storage',
+      })}`;
+    });
+    const store = useSyncSessionStore();
+    store.open();
+    await store.startSync();
+    emitTauriEvent('vcp-sync-status', { sessionId: 1, status: 'open' });
+    emitTauriEvent('vcp-sync-status', { sessionId: 1, status: 'error', error: syncError('END') });
+    await store.close();
+    expect(store.needsReload).toBe(true);
+    expect(reloads).toBe(0);
+
+    store.open();
+    await store.startSync();
+    expect(store.terminalError?.code).toBe('SYNC_STOP_PENDING');
+    expect(nextSession).toBe(1);
+    expect(reloads).toBe(0);
+    drainFinished = true;
+    await store.retrySync();
+
+    expect(store.needsReload).toBe(false);
+    expect(reloads).toBe(1);
+    expect(nextSession).toBe(2);
   });
 
   it("rejects sessionless events while battery detection is pending", async () => {

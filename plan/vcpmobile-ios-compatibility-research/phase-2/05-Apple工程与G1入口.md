@@ -1,6 +1,6 @@
 # Phase 2：Apple 工程与 G1 入口
 
-> 本文保留首次施工记录。下述 Swift shim、三 root 门禁和源码断言已按用户要求移除；当前 G1 直接执行工具链并收集原始诊断，见 [10-G1流程精简](./10-G1流程精简.md)。当前 CLI 为 2.12.1、官方 tao 为 0.37.1；旧门禁拒绝 log 的历史复现见 [08 的 R1](./08-代码复审与遗漏清单.md)。
+> 本文保留首次施工记录。下述 Swift shim、三 root 门禁和源码断言已按用户要求移除；当前 G1 直接执行工具链并收集原始诊断，见 [10-G1流程精简](./10-G1流程精简.md)。当前 CLI 为 2.12.1、官方 tao 为 0.37.1；用户后续已明确最低 iOS/iPadOS 26.0，历史 15.0 输入保留在第 2 节，现行配置见第 4 节与 [Phase 3](../phase-3/README.md)。旧门禁拒绝 log 的历史复现见 [08 的 R1](./08-代码复审与遗漏清单.md)。
 
 > 2026-10-08。已实现可重放工程输入和独立手动 workflow；本轮未推送、未触发 Actions、未执行 Apple 编译。Windows 检查结果与待执行 G1 分开记录。
 
@@ -43,8 +43,8 @@ shim 路径通过 PATH，真实 Swift/lock/evidence 通过 `TAURI_VCP_*` 传入�
 
 | 源输入/owner | 生成动作 | 后置检查 |
 |---|---|---|
-| `tauri.ios.conf.json` | CLI 自动合并，minimum 15.0 与 Network framework | minimum 一致、真实编译/链接 |
-| `Info.ios.plist` | CLI build 自动合并 | 单项 TaoScene/UIWindowScene/TaoSceneDelegate，multipleScenes=false |
+| `tauri.ios.conf.json` | CLI 自动合并，minimum 26.0；Network/UserNotifications/CoreMotion/CoreLocation framework，Metal 由 CLI 模板提供 | minimum 与 Swift package 一致、真实编译/链接 |
+| `Info.ios.plist` | CLI build 自动合并 | 单项 TaoScene/UIWindowScene/TaoSceneDelegate，multipleScenes=false；P3 新增 LAN、定位、运动用途与 local networking ATS |
 | 官方 tao 0.37.1 | 已替代原 0.35.3 vendor 补丁；窗口恢复由 app `ios_window` 接入 | 06 保留旧修正来源，11–13 记录当前 R2；G1 不宣称系统回调已运行 |
 | CLI `project.yml` | 保留 CLI 原始生成内容 | overlay 不改原 spec |
 | `project.vcp.json` | additive include 原 spec，加目标设置与隐私 resource | 重放不重复，未知 target 格式拒绝 |
@@ -53,7 +53,7 @@ shim 路径通过 PATH，真实 Swift/lock/evidence 通过 `TAURI_VCP_*` 传入�
 
 锁定 CLI 通过 XcodeGen 构造工程；XcodeGen spec 可用 JSON、`include` 默认数组追加，因此 overlay 不复制完整上游模板，只添加本项目所需差异。[CLI 模板](https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.11.4/crates/tauri-cli/templates/mobile/ios/project.yml)、[XcodeGen include 规则](https://github.com/yonaskolb/XcodeGen/blob/2.44.1/Docs/ProjectSpec.md#include)。
 
-隐私清单当前声明应用容器文件元数据 `C617.1` 与计时 `35F9.1`，对应共享 Rust 文件/计时路径；Phase 2 Swift 自身仅 Scene/Application、NWPathMonitor 和 Channel，不添加 disk/UserDefaults reason。没有伪造完整“零数据收集”声明；Phase 3–6 按最终实际 API 与业务数据用途继续审计。本阶段只建立当前 required-reason 输入和真实资源装配检查。[Apple API reasons](https://developer.apple.com/documentation/bundleresources/app-privacy-configuration/nsprivacyaccessedapitypes/nsprivacyaccessedapitypereasons)、[Apple 声明要求](https://developer.apple.com/documentation/bundleresources/describing-use-of-required-reason-api)。
+Phase 2 的隐私输入声明应用容器文件元数据 `C617.1` 与计时 `35F9.1`，对应共享 Rust 文件/计时路径；当时 Swift 仅 Scene/Application、NWPathMonitor 和 Channel。P3 已新增 DiskSpace `85F4.1`，只描述本机实际样本展示，不能声称覆盖任意远程遥测或完整 App Store 隐私合规。Phase 3–6 按最终实际 API 与数据用途继续审计；真实资源装配仍待 G1/G2。[Apple API reasons](https://developer.apple.com/documentation/bundleresources/app-privacy-configuration/nsprivacyaccessedapitypes/nsprivacyaccessedapitypereasons)、[Apple 声明要求](https://developer.apple.com/documentation/bundleresources/describing-use-of-required-reason-api)。
 
 ## 5. 当前 G1 执行与失败归属
 

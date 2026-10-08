@@ -54,8 +54,13 @@ content:「始」需要写入的内容「末」\n\
                     .unwrap_or("")
                     .to_string();
 
-                tauri_plugin_vcp_mobile::system::write_clipboard_native(app.clone(), content)
-                    .map_err(|e| format!("Native clipboard write failed: {}", e))?;
+                let native_app = app.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    tauri_plugin_vcp_mobile::system::write_clipboard_native(native_app, content)
+                })
+                .await
+                .map_err(|e| format!("Native clipboard task failed: {e}"))?
+                .map_err(|e| format!("Native clipboard write failed: {e}"))?;
 
                 Ok(json!({
                     "status": "success",
@@ -63,8 +68,13 @@ content:「始」需要写入的内容「末」\n\
                 }))
             }
             "read" => {
-                let content = tauri_plugin_vcp_mobile::system::read_clipboard_native(app.clone())
-                    .map_err(|e| format!("Native clipboard read failed: {}", e))?;
+                let native_app = app.clone();
+                let content = tauri::async_runtime::spawn_blocking(move || {
+                    tauri_plugin_vcp_mobile::system::read_clipboard_native(native_app)
+                })
+                .await
+                .map_err(|e| format!("Native clipboard task failed: {e}"))?
+                .map_err(|e| format!("Native clipboard read failed: {e}"))?;
 
                 Ok(json!({
                     "status": "success",

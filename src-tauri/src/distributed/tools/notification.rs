@@ -52,12 +52,18 @@ body:「始」通知内容「末」\n\
             .unwrap_or("")
             .to_string();
 
-        tauri_plugin_vcp_mobile::system::send_notification_native(app.clone(), title.clone(), body)
-            .map_err(|e| format!("Native notification send failed: {}", e))?;
+        let native_app = app.clone();
+        let native_title = title.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            tauri_plugin_vcp_mobile::system::send_notification_native(native_app, native_title, body)
+        })
+        .await
+        .map_err(|e| format!("Native notification task failed: {e}"))?
+        .map_err(|e| format!("Native notification send failed: {e}"))?;
 
         Ok(json!({
             "status": "success",
-            "message": format!("Notification sent: {}", title)
+            "message": format!("Notification accepted by the system: {}", title)
         }))
     }
 }

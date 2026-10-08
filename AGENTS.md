@@ -27,6 +27,8 @@
 
 后续功能范围与入口表达以用户最新逐项决定为准；2026-10-09 审批见 [Phase 2 功能权限与提示审议表](plan/vcpmobile-ios-compatibility-research/phase-2/09-功能权限与提示审议表.md)，其中新增意见优先于旧延期和隐藏建议。跨平台实现遵循 [跨平台开发规范](docs/CROSS_PLATFORM_DEVELOPMENT.md)。
 
+**iOS 最低版本**：2026-10-09 用户确定最低 iOS/iPadOS 26.0；Tauri 配置与项目 Swift manifest 同步维护，构建 SDK 独立选择。历史阶段的 15.0 基线只作为当时证据，不再约束当前产品；高于 26.0 的 API 仍须处理实际 availability 和运行条件。
+
 - 版本：`1.1.4`
 - 包名：`com.vcp.avatar`
 

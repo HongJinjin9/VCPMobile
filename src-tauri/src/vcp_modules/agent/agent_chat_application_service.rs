@@ -146,7 +146,12 @@ pub async fn internal_process_agent_chat_message(
         ForegroundLease::acquire(&app_handle, ForegroundTask::Stream, &agent_config.name).ok();
 
     // 在发起 VCP 请求前，向前端发射 thinking 事件以初始化气泡
-    let _ = stream_channel.send(StreamEvent::thinking(thinking_id.clone(), context.clone()));
+    crate::vcp_modules::vcp_client::deliver_request_event(
+        &app_handle,
+        &request_key,
+        Some(stream_channel.clone()),
+        StreamEvent::thinking(thinking_id.clone(), context.clone()),
+    );
 
     let request_payload = VcpRequestPayload {
         vcp_url: connection.endpoint_url,

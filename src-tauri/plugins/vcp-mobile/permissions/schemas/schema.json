@@ -505,6 +505,18 @@
           "markdownDescription": "Denies the get_network_status command without any pre-configured scope."
         },
         {
+          "description": "Enables the get_notification_permission command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-notification-permission",
+          "markdownDescription": "Enables the get_notification_permission command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_notification_permission command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-notification-permission",
+          "markdownDescription": "Denies the get_notification_permission command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_pending_notification command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-pending-notification",
@@ -551,6 +563,18 @@
           "type": "string",
           "const": "deny-open-file-native",
           "markdownDescription": "Denies the open_file_native command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_notification_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-notification-settings",
+          "markdownDescription": "Enables the open_notification_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_notification_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-notification-settings",
+          "markdownDescription": "Denies the open_notification_settings command without any pre-configured scope."
         },
         {
           "description": "Enables the open_unknown_sources_settings command without any pre-configured scope.",
@@ -659,6 +683,18 @@
           "type": "string",
           "const": "deny-request-notification-listener-permission",
           "markdownDescription": "Denies the request_notification_listener_permission command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the request_notification_permission command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-request-notification-permission",
+          "markdownDescription": "Enables the request_notification_permission command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the request_notification_permission command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-request-notification-permission",
+          "markdownDescription": "Denies the request_notification_permission command without any pre-configured scope."
         },
         {
           "description": "Enables the request_power_management_permission command without any pre-configured scope.",

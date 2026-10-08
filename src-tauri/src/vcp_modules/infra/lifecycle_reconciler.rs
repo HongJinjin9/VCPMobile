@@ -39,6 +39,7 @@ pub async fn reconcile_distributed_node(app_handle: &AppHandle, force_reconnect:
             return;
         }
     };
+    let _reconciliation = distributed_state.reconciliation.lock().await;
     let client = distributed_state.client.read().await;
 
     // 读取全局 settings，获取连接参数
@@ -54,7 +55,11 @@ pub async fn reconcile_distributed_node(app_handle: &AppHandle, force_reconnect:
         }
     };
 
-    let distributed_enabled = settings.distributed_enabled;
+    // iOS owns no background execution resource for this node. Background
+    // settings writes must not recreate a session after lifecycle suspension.
+    let distributed_enabled = settings.distributed_enabled
+        && (!cfg!(target_os = "ios")
+            || crate::vcp_modules::infra::lifecycle_manager::is_app_in_foreground(app_handle));
 
     let mut is_running = client.is_running().await;
     if force_reconnect && is_running {
@@ -65,11 +70,8 @@ pub async fn reconcile_distributed_node(app_handle: &AppHandle, force_reconnect:
 
     match (distributed_enabled, is_running) {
         (true, false) => {
-            // The iOS native tool set is not connected yet. Keep that startup
-            // choice here so settings/import/recovery still read state and stop
-            // existing sessions through this same owner on every target.
-            if !cfg!(target_os = "android") {
-                log::info!("[Lifecycle] Distributed native tools are not connected on this target; node startup skipped.");
+            if !cfg!(any(target_os = "android", target_os = "ios")) {
+                log::info!("[Lifecycle] Distributed node is a mobile runtime; host startup skipped.");
                 return;
             }
             let ws_url = settings.distributed_ws_url;
@@ -79,10 +81,6 @@ pub async fn reconcile_distributed_node(app_handle: &AppHandle, force_reconnect:
             } else {
                 settings.distributed_device_name
             };
-            if ws_url.is_empty() || vcp_key.is_empty() {
-                log::warn!("[Lifecycle] distributedEnabled=true but ws_url/vcp_key is empty, skipping auto-connect");
-                return;
-            }
             log::info!(
                 "[Lifecycle] distributedEnabled=true, starting distributed node connection..."
             );

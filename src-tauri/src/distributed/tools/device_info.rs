@@ -3,7 +3,7 @@
 // Mirrors VCPChat's WindowSensor plugin.
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::Value;
 use tauri::AppHandle;
 
 use crate::distributed::tool_registry::OneShotTool;
@@ -36,7 +36,18 @@ tool_name:「始」MobileDeviceInfo「末」\n\
     }
 
     async fn execute(&self, _args: Value, _app: &AppHandle) -> Result<Value, String> {
-        Ok(json!({
+        #[cfg(target_os = "ios")]
+        {
+            let app = _app.clone();
+            let snapshot = tauri::async_runtime::spawn_blocking(move || {
+                tauri_plugin_vcp_mobile::system::get_device_snapshot(app)
+            })
+            .await
+            .map_err(|error| format!("Device snapshot task failed: {error}"))??;
+            serde_json::to_value(snapshot).map_err(|error| error.to_string())
+        }
+        #[cfg(not(target_os = "ios"))]
+        Ok(serde_json::json!({
             "os": std::env::consts::OS,
             "arch": std::env::consts::ARCH,
             "family": std::env::consts::FAMILY,

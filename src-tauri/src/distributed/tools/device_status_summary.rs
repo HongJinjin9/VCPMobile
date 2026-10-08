@@ -40,7 +40,7 @@ impl StreamingTool for DeviceStatusSummaryTool {
         let telemetry = &dist_state.telemetry;
 
         let battery_str = telemetry.get_battery_brief(app);
-        let mem_str = telemetry.get_memory_brief();
+        let mem_str = telemetry.get_memory_brief(app);
         let net_str = telemetry.get_network_brief(app);
         let cpu_temp = telemetry.get_cpu_temp(app);
         let cpu_usage = telemetry.get_cpu_usage(app);
@@ -49,12 +49,12 @@ impl StreamingTool for DeviceStatusSummaryTool {
         let motion_state = telemetry.get_motion_brief(app);
 
         let brief_str = format!(
-            "{} | {} | 网络:{} | CPU温度:{}",
+            "{} | {} | 网络:{} | 热状态:{}",
             battery_str,
             mem_str,
             net_str,
             if cpu_temp.is_empty() || cpu_temp == "N/A" {
-                "正常".to_string()
+                "不可用".to_string()
             } else {
                 cpu_temp.clone()
             }

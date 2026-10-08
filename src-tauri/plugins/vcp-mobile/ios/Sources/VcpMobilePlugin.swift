@@ -33,6 +33,8 @@ private struct NativeEvent<Payload: Encodable>: Encodable {
 }
 
 final class VcpMobilePlugin: Plugin {
+    let notifications = NativeNotifications()
+
     // UIKit state, these process facts, and subscription ownership are main-queue only.
     // A Channel/WebView/plugin replacement must not reset Rust's sequence gate.
     private static var observedPhase: LifecyclePhase?
@@ -47,6 +49,14 @@ final class VcpMobilePlugin: Plugin {
     private var generation = UUID()
     private var lastDeliveredPhase: LifecyclePhase?
     private var lastNetworkConnected: Bool?
+
+    override init() {
+        super.init()
+        notifications.onClick = { [weak self] click in
+            self?.sendNotificationClick(click)
+        }
+        notifications.install()
+    }
 
     @objc override func load(webview: WKWebView) {
         DispatchQueue.main.async { [weak self] in
@@ -234,6 +244,15 @@ final class VcpMobilePlugin: Plugin {
     private func failSubscription(_ error: Error) {
         invalidateSubscription()
         NSLog("[VcpMobilePlugin] Native event source failed: %@", error.localizedDescription)
+    }
+
+    private func sendNotificationClick(_ click: NativeNotificationClick) {
+        do {
+            try channel?.send(NativeEvent(event: "notificationClick", payload: click))
+        } catch {
+            // The notification owner retains the pending intent for the getter.
+            NSLog("[VcpMobilePlugin] Notification click delivery failed: %@", error.localizedDescription)
+        }
     }
 
     private func invalidateSubscription() {

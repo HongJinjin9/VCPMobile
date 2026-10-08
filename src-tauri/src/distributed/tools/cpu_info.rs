@@ -19,7 +19,7 @@ impl StreamingTool for CpuInfoTool {
     fn manifest(&self) -> ToolManifest {
         ToolManifest {
             name: "MobileCPUInfo".to_string(),
-            description: "显示多核 CPU 拓扑、当前主频、核心温度及整机 CPU 占用率。".to_string(),
+            description: "读取系统可提供的 CPU 负载与热状态；频率或摄氏温度未公开时明确报告缺失，不推算为正常。".to_string(),
             display_name: "CPU核心监控".to_string(),
             placeholder: Some("{{MobileCPU}}".to_string()),
             invocation_commands: vec![],
@@ -42,10 +42,10 @@ impl StreamingTool for CpuInfoTool {
         let temp = dist_state.telemetry.get_cpu_temp(app);
 
         // 0.0 级：热度温度块
-        let brief_str = format!("CPU温度: {}", temp);
+        let brief_str = format!("CPU热状态: {}", temp);
 
         // 0.40 级：使用率及规格累加块 (包含 0.0 级数据)
-        let detail_str = format!("CPU 使用率: {} | 频率: {} | 温度: {}", usage, freq, temp);
+        let detail_str = format!("CPU 使用率: {} | 频率: {} | 热状态: {}", usage, freq, temp);
 
         let folded = format!(
             "[===vcp_fold: 0.0 ::desc: CPU芯片当前温度与发热情况===]\n{}\n\n[===vcp_fold: 0.40 ::desc: CPU核心当前运行主频、核心温控热敏感知、硬件拓扑与主频规格===]\n{}",

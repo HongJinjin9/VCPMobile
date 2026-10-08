@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { ref, computed, reactive, onScopeDispose } from "vue";
-import { invoke, Channel } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 
 import { useChatSessionStore } from "./chatSessionStore";
 import { useAssistantStore } from "./assistant";
@@ -97,8 +97,10 @@ export const useChatStreamStore = defineStore("chatStream", () => {
     string,
     StreamTerminalTombstone
   >();
-  // 覆盖完整 recovery command 生命周期，避免扫描门闩释放后重复 claim 同一消息。
-  const recoveryMessageIds = new Set<string>();
+  // Covers a recovery command or its attached live consumer until end/error.
+  const recoveryMessageIds = new Map<string, object>();
+  const streamConsumerRevisions = new Map<string, number>();
+  let disposed = false;
 
   function isStreamDebugEnabled(): boolean {
     return Boolean(import.meta.env.DEV && (window as any).__VCP_STREAM_DEBUG__);
@@ -410,12 +412,13 @@ export const useChatStreamStore = defineStore("chatStream", () => {
     const job = (async () => {
       // 同一消息最多保留一个在途请求；若流在编译期间前进，就直接追赶最新 source/cursor。
       for (;;) {
-        if (hasStreamTerminalTombstone(messageKey)) return false;
+        if (disposed || hasStreamTerminalTombstone(messageKey)) return false;
         const message = activeStreamMessages.get(messageKey);
         const pending = rAFPendingUpdates.get(messageKey);
         if (!message || !pending) return false;
 
         const source = pending.content ?? message.content ?? "";
+        const consumerRevision = streamConsumerRevisions.get(messageKey);
         const cursor = pending.tailCursor ?? cursorFromFrame(message.tailFrame);
         if (!cursor) return false;
 
@@ -439,7 +442,7 @@ export const useChatStreamStore = defineStore("chatStream", () => {
           return false;
         }
 
-        if (hasStreamTerminalTombstone(messageKey)) return false;
+        if (disposed || hasStreamTerminalTombstone(messageKey)) return false;
         const latestMessage = activeStreamMessages.get(messageKey);
         const latestPending = rAFPendingUpdates.get(messageKey);
         if (!latestMessage || !latestPending) return false;
@@ -448,7 +451,8 @@ export const useChatStreamStore = defineStore("chatStream", () => {
           ?? "";
         const latestCursor = latestPending.tailCursor
           ?? cursorFromFrame(latestMessage.tailFrame);
-        if (latestSource !== source || !cursorsEqual(latestCursor, cursor)) {
+        if (streamConsumerRevisions.get(messageKey) !== consumerRevision
+          || latestSource !== source || !cursorsEqual(latestCursor, cursor)) {
           continue;
         }
 
@@ -491,7 +495,7 @@ export const useChatStreamStore = defineStore("chatStream", () => {
         return true;
       }
     })().finally(() => {
-      auroraSnapshotJobs.delete(messageKey);
+      if (auroraSnapshotJobs.get(messageKey) === job) auroraSnapshotJobs.delete(messageKey);
     });
 
     auroraSnapshotJobs.set(messageKey, job);
@@ -654,6 +658,7 @@ export const useChatStreamStore = defineStore("chatStream", () => {
       // 只删除已完成的流（不在当前活跃会话中）
       if (!activeStreamKeySet.value.has(messageKey)) {
         activeStreamMessages.delete(messageKey);
+        streamConsumerRevisions.delete(messageKey);
         remaining -= 1;
       }
     }
@@ -710,6 +715,7 @@ export const useChatStreamStore = defineStore("chatStream", () => {
       cleanupTimers.delete(cleanupTimer);
       if (!activeStreamKeySet.value.has(messageKey)) {
         activeStreamMessages.delete(messageKey);
+        streamConsumerRevisions.delete(messageKey);
         clearRAFUpdate(messageKey, false); // 漏洞 2 修复：延迟清理时，强制安全注销 rAF 帧，杜绝句柄泄露
       }
     }, 1000);
@@ -726,6 +732,7 @@ export const useChatStreamStore = defineStore("chatStream", () => {
       onStreamFinished?: (messageId: string, topicId: string) => void;
     },
   ) => {
+    if (disposed) return;
     const actualMessageId = event.messageId || "";
     const { type, context } = event;
     const ctx = context || {};
@@ -747,11 +754,32 @@ export const useChatStreamStore = defineStore("chatStream", () => {
     );
 
     if (hasStreamTerminalTombstone(messageKey)) return;
+    if (!Number.isSafeInteger(event.consumerRevision) || event.consumerRevision <= 0) return;
+    const currentRevision = streamConsumerRevisions.get(messageKey) ?? 0;
+    if (event.consumerRevision < currentRevision) return;
+    if (event.consumerRevision > currentRevision) {
+      clearRAFUpdate(messageKey, false);
+      if (recoveryMessageIds.has(messageKey)) recoveryMessageIds.set(messageKey, {});
+    }
+    streamConsumerRevisions.set(messageKey, event.consumerRevision);
+    if (type === "end" || type === "error") recoveryMessageIds.delete(messageKey);
     if (type === "end") {
       recordStreamTerminalTombstone(messageKey);
     }
 
     let msg = activeStreamMessages.get(messageKey);
+    if (!msg) {
+      const history = useChatHistoryStore();
+      const loaded = history.loadedConversationKey;
+      if (loaded && loaded.ownerId === ownerId && loaded.ownerType === ownerType
+        && loaded.topicId === topicId && sessionStore.isConversationCurrent(loaded)) {
+        msg = history.currentChatHistory.find(message => message.id === actualMessageId);
+        if (msg) activeStreamMessages.set(messageKey, msg);
+      }
+    }
+    const consumerRevision = streamConsumerRevisions.get(messageKey);
+    const ownsConsumer = () => !disposed
+      && streamConsumerRevisions.get(messageKey) === consumerRevision;
     const isNewStream = !msg;
 
     if (isNewStream) {
@@ -803,6 +831,7 @@ export const useChatStreamStore = defineStore("chatStream", () => {
       }
     } else if (type === "aurora") {
       msg!.isThinking = false;
+      msg!.isReconnecting = false;
       addSessionStream(ownerId, ownerType, topicId, actualMessageId);
 
       const aurora = event.aurora;
@@ -1066,6 +1095,7 @@ export const useChatStreamStore = defineStore("chatStream", () => {
 
         // 定义闭环终结函数，保证在 blocks 赋值完成后才移除活动流状态
         const finalizeStream = () => {
+          if (!ownsConsumer()) return;
           msg!.tailContent = "";
           msg!.tailBlock = undefined;
           msg!.tailOp = undefined;
@@ -1088,6 +1118,7 @@ export const useChatStreamStore = defineStore("chatStream", () => {
               content: msg!.content || "",
             })
               .then((compiledBlocks) => {
+                if (!ownsConsumer()) return;
                 msg.blocks = compiledBlocks;
                 finalizeStream();
               })
@@ -1162,6 +1193,7 @@ export const useChatStreamStore = defineStore("chatStream", () => {
   };
 
   onScopeDispose(() => {
+    disposed = true;
     recoveryMessageIds.clear();
     cleanupTimers.forEach(clearTimeout);
     cleanupTimers.clear();
@@ -1172,6 +1204,7 @@ export const useChatStreamStore = defineStore("chatStream", () => {
     });
     rAFPendingUpdates.clear();
     streamTerminalTombstones.clear();
+    streamConsumerRevisions.clear();
   });
 
   const isRecovering = ref(false);
@@ -1180,18 +1213,33 @@ export const useChatStreamStore = defineStore("chatStream", () => {
    * 检查并恢复被异常打断的活跃生成（冷启动自对齐与流接续）
    */
   const checkAndRecoverInterruptedStreams = async () => {
-    if (isRecovering.value) return;
+    if (disposed || isRecovering.value) return;
     isRecovering.value = true;
 
     // 1. 本地扫表：无网状态下也能运行
     let activeGens: ActiveGenerationDto[] = [];
     try {
-      activeGens = await invoke<ActiveGenerationDto[]>("get_active_generations");
+      const streamChannel = useChatHistoryStore().makeStreamChannel(null);
+      activeGens = await invoke<ActiveGenerationDto[]>("get_active_generations", { streamChannel });
     } catch (e) {
       console.error("[ChatStreamStore] Failed to get active generations:", e);
       isRecovering.value = false;
       return;
     }
+
+    if (disposed) {
+      isRecovering.value = false;
+      return;
+    }
+    activeGens = (activeGens ?? []).filter((generation) =>
+      (generation.ownerType === "agent" || generation.ownerType === "group")
+      && !recoveryMessageIds.has(streamMessageMapKey(
+        generation.ownerId, generation.ownerType, generation.topicId, generation.msgId,
+      ))
+      && !hasStreamTerminalTombstone(streamMessageMapKey(
+        generation.ownerId, generation.ownerType, generation.topicId, generation.msgId,
+      )),
+    );
 
     if (!activeGens || activeGens.length === 0) {
       isRecovering.value = false;
@@ -1290,7 +1338,11 @@ export const useChatStreamStore = defineStore("chatStream", () => {
             : null;
 
         if (recoveryMessageIds.has(messageKey)) continue;
-        recoveryMessageIds.add(messageKey);
+        const recoveryOwner = {};
+        recoveryMessageIds.set(messageKey, recoveryOwner);
+        const ownsRecovery = () => !disposed
+          && recoveryMessageIds.get(messageKey) === recoveryOwner
+          && !hasStreamTerminalTombstone(messageKey);
 
         const isWarm = warmMessageIds.has(messageKey);
         if (!isWarm && ownerType === "agent" && !recoveryKey) {
@@ -1324,36 +1376,12 @@ export const useChatStreamStore = defineStore("chatStream", () => {
           }
         }
 
-        const streamChannel = new Channel<StreamEventDto>();
-        streamChannel.onmessage = (event) =>
-          processStreamEvent(event, {
-            onMessageCreated: (m, tid) => {
-              const historyStore = useChatHistoryStore();
-              if (
-                recoveryKey &&
-                tid === recoveryKey.topicId &&
-                sessionStore.isConversationCurrent(recoveryKey) &&
-                !historyStore.currentChatHistory.some((x) => x.id === m.id)
-              ) {
-                historyStore.currentChatHistory.push(m);
-                historyStore.currentChatHistory.sort(compareMessageOrder);
-              }
-            },
-            onStreamFinished: (_mid, tid) => {
-              if (
-                recoveryKey &&
-                tid === recoveryKey.topicId &&
-                sessionStore.isConversationCurrent(recoveryKey)
-              ) {
-                const historyStore = useChatHistoryStore();
-                historyStore.summarizeTopic();
-              }
-            },
-          });
+        const streamChannel = useChatHistoryStore().makeStreamChannel(null);
 
         // 后端在一个 owner lease 内先判定 durable 状态，再决定是否需要网络接续。
         // navigator.onLine 不能前置否决：Finalizing/Interrupted 等状态必须可离线收口。
         // 扫描门闩可以释放，但 recoveryMessageIds 会覆盖整个长连接生命周期。
+        let attached = false;
         void invoke<RecoveryResultDto>("recover_active_generation", {
           ownerId,
           ownerType,
@@ -1363,11 +1391,12 @@ export const useChatStreamStore = defineStore("chatStream", () => {
           isWarm,
         })
           .then((res) => {
+            if (!ownsRecovery()) return;
             console.log(
               `[ChatStreamStore] Recovery status for ${msgId}: ${String(res?.status ?? "unknown")}`,
             );
-            if (res.status === "already_running") {
-              if (recoveryMessage) recoveryMessage.isReconnecting = false;
+            if (res.status === "attached") {
+              attached = true;
               return;
             }
 
@@ -1376,10 +1405,15 @@ export const useChatStreamStore = defineStore("chatStream", () => {
               recoveryMessage.isThinking = false;
               if (typeof res.content === "string") {
                 recoveryMessage.content = res.content;
+                const content = res.content;
+                const consumerRevision = streamConsumerRevisions.get(messageKey);
                 invoke<ContentBlock[]>("process_message_content", {
-                  content: recoveryMessage.content,
+                  content,
                 })
                   .then((compiledBlocks) => {
+                    if (disposed || hasStreamTerminalTombstone(messageKey)
+                      || streamConsumerRevisions.get(messageKey) !== consumerRevision
+                      || recoveryMessage.content !== content) return;
                     recoveryMessage.blocks = compiledBlocks;
                   })
                   .catch((e) => {
@@ -1391,6 +1425,8 @@ export const useChatStreamStore = defineStore("chatStream", () => {
               }
               if (res.status === "failed" || res.status === "not_found") {
                 recoveryMessage.finishReason = "error";
+              } else if (res.status === "completed" && res.finishReason) {
+                recoveryMessage.finishReason = res.finishReason;
               }
             }
             removeSessionStream(ownerId, ownerType, topicId, msgId);
@@ -1408,6 +1444,7 @@ export const useChatStreamStore = defineStore("chatStream", () => {
             }
           })
           .catch((err) => {
+            if (!ownsRecovery()) return;
             console.error(
               `[ChatStreamStore] Failed to recover stream for ${msgId}:`,
               err,
@@ -1422,7 +1459,9 @@ export const useChatStreamStore = defineStore("chatStream", () => {
             removeSessionStream(ownerId, ownerType, topicId, msgId);
           })
           .finally(() => {
-            recoveryMessageIds.delete(messageKey);
+            if (!attached && recoveryMessageIds.get(messageKey) === recoveryOwner) {
+              recoveryMessageIds.delete(messageKey);
+            }
           });
       }
 

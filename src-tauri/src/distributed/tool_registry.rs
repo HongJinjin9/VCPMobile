@@ -491,8 +491,15 @@ impl ToolRegistry {
             ToolEntry::OneShot(tool) => tool.execute_with_context(args, app, context).await,
             ToolEntry::Interactive(tool) => tool.execute(args, app).await,
             ToolEntry::Streaming(tool) => {
-                // For streaming tools, execute_tool returns a current snapshot.
-                tool.read_current(app).map(serde_json::Value::String)
+                // Explicit reads have the same sampling prerequisites as the
+                // connected scheduler, including native permission/errors.
+                super::streaming_scheduler::sample_sensors(app, tool.sensor_demand()).await;
+                let tool = tool.clone();
+                let app = app.clone();
+                tauri::async_runtime::spawn_blocking(move || tool.read_current(&app))
+                    .await
+                    .map_err(|error| format!("Streaming sample task failed: {error}"))?
+                    .map(serde_json::Value::String)
             }
         }
     }

@@ -47,6 +47,40 @@ impl SensorDemand {
     }
 }
 
+/// Both an explicit sample and a scheduled batch refresh the same telemetry
+/// owner. A failed sample replaces the requested fields with its actual error,
+/// rather than publishing a previous success as a fresh observation.
+pub(super) async fn sample_sensors(app: &AppHandle, demand: SensorDemand) {
+    if demand.is_empty() {
+        return;
+    }
+    let state = app.state::<DistributedState>();
+    let _sample_owner = state.telemetry.sensor_sampling.lock().await;
+    let mut snapshot = match tauri_plugin_vcp_mobile::system::sample_sensor_data(
+        app.clone(), demand.location, demand.motion, demand.ambient,
+    ).await {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            let unavailable = format!("本次采样不可用: {error}");
+            tauri_plugin_vcp_mobile::system::SensorSample {
+                location: demand.location.then(|| unavailable.clone()),
+                motion: demand.motion.then(|| unavailable.clone()),
+                ambient: demand.ambient.then_some(unavailable),
+            }
+        }
+    };
+    if demand.location && snapshot.location.is_none() {
+        snapshot.location = Some("本次定位采样未返回结果".to_string());
+    }
+    if demand.motion && snapshot.motion.is_none() {
+        snapshot.motion = Some("本次运动采样未返回结果".to_string());
+    }
+    if demand.ambient && snapshot.ambient.is_none() {
+        snapshot.ambient = Some("本次环境采样未返回结果".to_string());
+    }
+    state.telemetry.update_sensor_snapshot(&snapshot);
+}
+
 #[derive(Clone)]
 pub struct StreamingToolSpec {
     pub name: String,
@@ -148,24 +182,7 @@ impl StreamingScheduler {
             let tag = format!("distributed:telemetry:{}", uuid::Uuid::new_v4());
             let _lease = StreamingForegroundLease::acquire(&app, tag);
 
-            if !demand.is_empty() {
-                match tauri_plugin_vcp_mobile::system::sample_sensor_data(
-                    app.clone(),
-                    demand.location,
-                    demand.motion,
-                    demand.ambient,
-                )
-                .await
-                {
-                    Ok(snapshot) => app
-                        .state::<DistributedState>()
-                        .telemetry
-                        .update_sensor_snapshot(&snapshot),
-                    Err(error) => {
-                        log::warn!("[Distributed] Native sensor sample failed: {error}")
-                    }
-                }
-            }
+            sample_sensors(&app, demand).await;
 
             let render_app = app.clone();
             let placeholders = match tauri::async_runtime::spawn_blocking(move || {
@@ -175,11 +192,10 @@ impl StreamingScheduler {
                         Ok(value) => {
                             values.insert(spec.placeholder, value);
                         }
-                        Err(error) => log::warn!(
-                            "[Distributed] Streaming tool '{}' sample failed: {}",
-                            spec.name,
-                            error
-                        ),
+                        Err(error) => {
+                            log::warn!("[Distributed] Streaming tool '{}' sample failed: {}", spec.name, error);
+                            values.insert(spec.placeholder, format!("本次采样不可用: {error}"));
+                        }
                     }
                 }
                 values

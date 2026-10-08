@@ -1,7 +1,8 @@
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 use crate::VcpMobileState;
 use serde::{Deserialize, Serialize};
-#[cfg(target_os = "android")]
+use std::collections::BTreeMap;
+#[cfg(any(target_os = "android", target_os = "ios"))]
 use tauri::Manager;
 use tauri::{AppHandle, Runtime};
 
@@ -50,6 +51,65 @@ pub struct PermissionStatus {
     pub microphone: bool,
     pub camera: bool,
     pub location: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NotificationAuthorization {
+    NotDetermined,
+    Denied,
+    Authorized,
+    Provisional,
+    Ephemeral,
+    Unknown,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NotificationPermission {
+    pub authorization: NotificationAuthorization,
+}
+
+#[tauri::command]
+pub async fn get_notification_permission<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<NotificationPermission, String> {
+    #[cfg(target_os = "ios")]
+    {
+        crate::ios::run_async(app, "getNotificationPermission", serde_json::json!({})).await
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = app;
+        Err("unsupported: this notification authorization API requires iOS".into())
+    }
+}
+
+#[tauri::command]
+pub async fn request_notification_permission<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<NotificationPermission, String> {
+    #[cfg(target_os = "ios")]
+    {
+        crate::ios::run_async(app, "requestNotificationPermission", serde_json::json!({})).await
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = app;
+        Err("unsupported: this notification authorization API requires iOS".into())
+    }
+}
+
+#[tauri::command]
+pub async fn open_notification_settings<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    #[cfg(target_os = "ios")]
+    {
+        crate::ios::run_async(app, "openNotificationSettings", serde_json::json!({})).await
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = app;
+        Err("unsupported: this notification settings API requires iOS".into())
+    }
 }
 
 #[tauri::command]
@@ -302,9 +362,11 @@ pub struct DiskSpaceInfo {
     pub free_gb: f64,
     pub total_bytes: u64,
     pub total_gb: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub volume: Option<String>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_free_disk_space<R: Runtime>(app: AppHandle<R>) -> Result<DiskSpaceInfo, String> {
     #[cfg(target_os = "android")]
     {
@@ -318,8 +380,7 @@ pub fn get_free_disk_space<R: Runtime>(app: AppHandle<R>) -> Result<DiskSpaceInf
     }
     #[cfg(target_os = "ios")]
     {
-        let _ = app;
-        crate::ios_not_implemented("get_free_disk_space")
+        crate::ios::run(app, "getFreeDiskSpace", serde_json::json!({}))
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
@@ -329,6 +390,7 @@ pub fn get_free_disk_space<R: Runtime>(app: AppHandle<R>) -> Result<DiskSpaceInf
             free_gb: 10.0,
             total_bytes: 100 * 1024 * 1024 * 1024,
             total_gb: 100.0,
+            volume: None,
         })
     }
 }
@@ -380,13 +442,15 @@ pub fn pick_file<R: Runtime>(
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BatteryStatus {
-    pub level: i32,
+    pub level: Option<i32>,
     pub is_power_save_mode: bool,
     pub status: Option<String>,
     pub temperature: Option<f64>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub unavailable: BTreeMap<String, String>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_battery_status<R: Runtime>(app: AppHandle<R>) -> Result<BatteryStatus, String> {
     #[cfg(target_os = "android")]
     {
@@ -400,17 +464,17 @@ pub fn get_battery_status<R: Runtime>(app: AppHandle<R>) -> Result<BatteryStatus
     }
     #[cfg(target_os = "ios")]
     {
-        let _ = app;
-        crate::ios_not_implemented("get_battery_status")
+        crate::ios::run(app, "getBatteryStatus", serde_json::json!({}))
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         Ok(BatteryStatus {
-            level: 100,
+            level: Some(100),
             is_power_save_mode: false,
             status: Some("未充电".to_string()),
             temperature: Some(25.0),
+            unavailable: BTreeMap::new(),
         })
     }
 }
@@ -420,12 +484,18 @@ pub fn get_battery_status<R: Runtime>(app: AppHandle<R>) -> Result<BatteryStatus
 pub struct NetworkStatus {
     pub connected: bool,
     pub r#type: String,
-    pub down_speed_kbps: i32,
-    pub up_speed_kbps: i32,
-    pub ip: String,
+    pub down_speed_kbps: Option<i32>,
+    pub up_speed_kbps: Option<i32>,
+    pub ip: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_expensive: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_constrained: Option<bool>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub unavailable: BTreeMap<String, String>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_network_status<R: Runtime>(app: AppHandle<R>) -> Result<NetworkStatus, String> {
     #[cfg(target_os = "android")]
     {
@@ -439,8 +509,7 @@ pub fn get_network_status<R: Runtime>(app: AppHandle<R>) -> Result<NetworkStatus
     }
     #[cfg(target_os = "ios")]
     {
-        let _ = app;
-        crate::ios_not_implemented("get_network_status")
+        crate::ios::run(app, "getNetworkStatus", serde_json::json!({}))
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
@@ -448,10 +517,46 @@ pub fn get_network_status<R: Runtime>(app: AppHandle<R>) -> Result<NetworkStatus
         Ok(NetworkStatus {
             connected: true,
             r#type: "以太网".to_string(),
-            down_speed_kbps: 100000,
-            up_speed_kbps: 100000,
-            ip: "127.0.0.1".to_string(),
+            down_speed_kbps: Some(100000),
+            up_speed_kbps: Some(100000),
+            ip: Some("127.0.0.1".to_string()),
+            is_expensive: None,
+            is_constrained: None,
+            unavailable: BTreeMap::new(),
         })
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceSnapshot {
+    pub model: String,
+    pub system_name: String,
+    pub system_version: String,
+    pub architecture: String,
+    pub hardware_identifier: Option<String>,
+    pub processor_count: u32,
+    pub active_processor_count: u32,
+    pub cpu_usage_percent: Option<f64>,
+    pub physical_memory_bytes: u64,
+    pub process_resident_memory_bytes: Option<u64>,
+    pub process_available_memory_bytes: u64,
+    pub thermal_state: String,
+    #[serde(default)]
+    pub unavailable: BTreeMap<String, String>,
+}
+
+/// Device/CPU/memory tool input. This is an internal native read, not a second
+/// platform capability snapshot or a frontend command.
+pub fn get_device_snapshot<R: Runtime>(app: AppHandle<R>) -> Result<DeviceSnapshot, String> {
+    #[cfg(target_os = "ios")]
+    {
+        crate::ios::run(app, "getDeviceSnapshot", serde_json::json!({}))
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = app;
+        Err("unsupported: this device snapshot API requires iOS".into())
     }
 }
 
@@ -1155,15 +1260,15 @@ pub struct SensorSample {
 }
 
 /// 按本批 streaming tools 的真实需求执行一次有界传感器采样。
-/// Android 回调最多等待一个短采样窗口；同步 PluginHandle 调用被放入 blocking worker，
-/// 避免占用 Tokio 网络任务线程。
+/// 原生回调只持有本次采样/授权窗口；同步 PluginHandle 调用放入 blocking worker。
+/// 调用方取消只分离 worker，原生最终回调之前不会丢弃 Tauri receiver。
 pub async fn sample_sensor_data<R: Runtime>(
     app: AppHandle<R>,
     location: bool,
     motion: bool,
     ambient: bool,
 ) -> Result<SensorSample, String> {
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let state = app.state::<VcpMobileState<R>>();
         let plugin_handle = state.mobile_plugin_handle()?;
@@ -1182,11 +1287,6 @@ pub async fn sample_sensor_data<R: Runtime>(
         .await
         .map_err(|error| format!("sensor sample worker failed: {error}"))?
     }
-    #[cfg(target_os = "ios")]
-    {
-        let _ = (app, location, motion, ambient);
-        crate::ios_not_implemented("sample_sensor_data")
-    }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
@@ -1200,7 +1300,7 @@ pub async fn sample_sensor_data<R: Runtime>(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_cpu_thermal_status<R: Runtime>(app: AppHandle<R>) -> Result<String, String> {
     #[cfg(target_os = "android")]
     {
@@ -1218,8 +1318,13 @@ pub fn get_cpu_thermal_status<R: Runtime>(app: AppHandle<R>) -> Result<String, S
     }
     #[cfg(target_os = "ios")]
     {
-        let _ = app;
-        crate::ios_not_implemented("get_cpu_thermal_status")
+        #[derive(Deserialize)]
+        struct ThermalResponse {
+            status: String,
+        }
+        let response: ThermalResponse =
+            crate::ios::run(app, "getCpuThermalStatus", serde_json::json!({}))?;
+        Ok(response.status)
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
@@ -1233,9 +1338,11 @@ pub fn get_cpu_thermal_status<R: Runtime>(app: AppHandle<R>) -> Result<String, S
 pub struct GpuStatus {
     pub renderer: String,
     pub restricted: bool,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub unavailable: BTreeMap<String, String>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_gpu_status<R: Runtime>(app: AppHandle<R>) -> Result<GpuStatus, String> {
     #[cfg(target_os = "android")]
     {
@@ -1249,8 +1356,7 @@ pub fn get_gpu_status<R: Runtime>(app: AppHandle<R>) -> Result<GpuStatus, String
     }
     #[cfg(target_os = "ios")]
     {
-        let _ = app;
-        crate::ios_not_implemented("get_gpu_status")
+        crate::ios::run(app, "getGpuStatus", serde_json::json!({}))
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
@@ -1258,6 +1364,7 @@ pub fn get_gpu_status<R: Runtime>(app: AppHandle<R>) -> Result<GpuStatus, String
         Ok(GpuStatus {
             renderer: "PC Mock GPU".to_string(),
             restricted: true,
+            unavailable: BTreeMap::new(),
         })
     }
 }
@@ -1352,8 +1459,7 @@ pub fn write_clipboard_native<R: Runtime>(
     }
     #[cfg(target_os = "ios")]
     {
-        let _ = (app, content);
-        crate::ios_not_implemented::<()>("write_clipboard_native")?;
+        crate::ios::run::<R, ()>(app, "writeClipboard", serde_json::json!({ "content": content }))?;
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
@@ -1375,8 +1481,9 @@ pub fn read_clipboard_native<R: Runtime>(app: AppHandle<R>) -> Result<String, St
     }
     #[cfg(target_os = "ios")]
     {
-        let _ = app;
-        crate::ios_not_implemented("read_clipboard_native")
+        let response: ClipboardReadResult =
+            crate::ios::run(app, "readClipboard", serde_json::json!({}))?;
+        Ok(response.content)
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
@@ -1403,8 +1510,11 @@ pub fn send_notification_native<R: Runtime>(
     }
     #[cfg(target_os = "ios")]
     {
-        let _ = (app, title, body);
-        crate::ios_not_implemented::<()>("send_notification_native")?;
+        crate::ios::run::<R, ()>(
+            app,
+            "sendLocalNotification",
+            serde_json::json!({ "title": title, "body": body }),
+        )?;
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
@@ -1525,7 +1635,7 @@ pub fn start_network_monitoring<R: Runtime>(app: AppHandle<R>) -> Result<(), Str
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_pending_notification<R: Runtime>(
     app: AppHandle<R>,
 ) -> Result<serde_json::Value, String> {
@@ -1544,12 +1654,69 @@ pub fn get_pending_notification<R: Runtime>(
     }
     #[cfg(target_os = "ios")]
     {
-        let _ = app;
-        crate::ios_not_implemented("get_pending_notification")
+        crate::ios::run(app, "getPendingNotification", serde_json::json!({}))
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         Ok(serde_json::json!({}))
+    }
+}
+
+#[cfg(test)]
+mod device_result_tests {
+    use super::{BatteryStatus, NetworkStatus};
+    use serde_json::json;
+
+    #[test]
+    fn battery_keeps_a_real_zero_distinct_from_an_unavailable_native_reading() {
+        let android: BatteryStatus = serde_json::from_value(json!({
+            "level": 0, "isPowerSaveMode": true,
+            "status": "未充电", "temperature": 23.5
+        }))
+        .unwrap();
+        assert_eq!(android.level, Some(0));
+        assert!(android.unavailable.is_empty());
+
+        // Swift synthesized Encodable omits nil fields. Rust's frontend result
+        // must still express an unknown reading as null, rather than 0 or 100.
+        let ios: BatteryStatus = serde_json::from_value(json!({
+            "isPowerSaveMode": false,
+            "unavailable": {"level": "系统尚未提供电量读数", "temperature": "iOS 未公开电池温度"}
+        }))
+        .unwrap();
+        assert_eq!(ios.level, None);
+        assert_eq!(ios.temperature, None);
+        let result = serde_json::to_value(ios).unwrap();
+        assert!(result["level"].is_null());
+        assert_eq!(result["unavailable"]["level"], "系统尚未提供电量读数");
+    }
+
+    #[test]
+    fn network_path_without_speed_does_not_become_a_zero_speed_measurement() {
+        let android: NetworkStatus = serde_json::from_value(json!({
+            "connected": true, "type": "wifi", "downSpeedKbps": 0,
+            "upSpeedKbps": 1200, "ip": "192.168.1.2"
+        }))
+        .unwrap();
+        assert_eq!(android.down_speed_kbps, Some(0));
+        assert_eq!(android.up_speed_kbps, Some(1200));
+        assert_eq!(android.ip.as_deref(), Some("192.168.1.2"));
+
+        let ios: NetworkStatus = serde_json::from_value(json!({
+            "connected": true, "type": "Wi-Fi", "isExpensive": false,
+            "isConstrained": true, "unavailable": {
+                "downSpeedKbps": "NWPath 不提供链路下行速率",
+                "ip": "未取得活动接口地址"
+            }
+        }))
+        .unwrap();
+        assert!(ios.connected);
+        assert_eq!(ios.down_speed_kbps, None);
+        assert_eq!(ios.ip, None);
+        assert_eq!(ios.is_constrained, Some(true));
+        let result = serde_json::to_value(ios).unwrap();
+        assert!(result["downSpeedKbps"].is_null());
+        assert_eq!(result["unavailable"]["ip"], "未取得活动接口地址");
     }
 }

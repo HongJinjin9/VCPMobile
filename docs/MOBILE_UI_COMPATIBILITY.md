@@ -13,7 +13,7 @@ VCP Mobile 当前 Android 生产运行、构建与发布覆盖以下目标：
 - Android `arm64-v8a` 触控平板；
 - Android `arm64-v8a` 折叠屏，按**当前应用窗口的可用 CSS 宽度**响应，不按设备名称或物理形态分叉。
 
-iPhone/iPad 原生客户端的目标为同一 Vue/Rust 核心加 Swift adapter、单 Scene、当前窗口宽度响应，以及供用户自行签名的实验性 device 产物。minimum 采用 iOS/iPadOS 15.0 工程基线，新 API 按 availability 分层。
+iPhone/iPad 原生客户端的目标为同一 Vue/Rust 核心加 Swift adapter、单 Scene、当前窗口宽度响应，以及供用户自行签名的实验性 device 产物。最低支持 iOS/iPadOS 26.0（2026-10-09 用户决定）；高于该基线的 API 按 availability 分层。SDK 版本与最低运行版本分别管理，不随系统年度发布自动抬高最低版本。
 
 功能范围以 [D1–D19](../plan/vcpmobile-ios-compatibility-research/09-Magi综合裁决与待决策清单.md) 及用户最新的 [功能审批](../plan/vcpmobile-ios-compatibility-research/phase-2/09-功能权限与提示审议表.md) 为准，最新逐项意见优先于旧建议。实施与证据见 [iOS 阶段记录](../plan/vcpmobile-ios-compatibility-research/README.md)，本规范不另行复制功能清单。
 

@@ -295,6 +295,8 @@ pub struct StreamEvent {
     pub blocks: Option<Vec<ContentBlock>>, // 持久化后的预渲染块 (仅 type="end" 时有效)
     pub timestamp: Option<u64>, // ⚡ 新增物理落笔时间戳
     pub topic_updated_at: Option<i64>, // durable message bubble 后的话题列表权威时间
+    /// Orders delivery consumers independently of the Aurora AST frame sequence.
+    pub consumer_revision: u64,
 }
 
 impl StreamEvent {
@@ -439,6 +441,159 @@ pub(crate) fn stream_error_content(partial_content: &str, error: &str) -> String
 pub struct ActiveRequestEntry {
     attempt_id: uuid::Uuid,
     cancellation_token: CancellationToken,
+    output: Arc<RequestOutput>,
+    released: CancellationToken,
+}
+
+#[derive(Default)]
+struct RequestOutputState {
+    channel: Option<Channel<StreamEvent>>,
+    snapshot_pending: bool,
+    closed: bool,
+    consumer_revision: u64,
+}
+
+static NEXT_CONSUMER_REVISION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn next_consumer_revision() -> u64 {
+    NEXT_CONSUMER_REVISION.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The request retains one output consumer, not another copy of its content.
+/// AuroraBuffer remains in the producer; a replacement consumer starts with a
+/// snapshot from that buffer before any subsequent delta is committed.
+#[derive(Default)]
+struct RequestOutput {
+    state: std::sync::Mutex<RequestOutputState>,
+    changed: tokio::sync::Notify,
+}
+
+impl RequestOutput {
+    fn bind_initial(&self, channel: Option<Channel<StreamEvent>>) {
+        if let Ok(mut state) = self.state.lock() {
+            if state.channel.is_none() && !state.closed {
+                state.channel = channel;
+                state.consumer_revision = next_consumer_revision();
+            }
+        }
+    }
+
+    fn attach(&self, channel: Channel<StreamEvent>) -> Result<bool, String> {
+        let mut state = self.state.lock().map_err(|error| error.to_string())?;
+        if state.closed {
+            return Ok(false);
+        }
+        if state.channel.as_ref().is_some_and(|current| current.id() == channel.id()) {
+            return Ok(true);
+        }
+        state.channel = Some(channel);
+        state.snapshot_pending = true;
+        state.consumer_revision = next_consumer_revision();
+        drop(state);
+        // One producer waits here; notify_one retains a permit if it is between
+        // awaits. The flag also covers replacement while it sends an update.
+        self.changed.notify_one();
+        Ok(true)
+    }
+
+    fn needs_snapshot(&self) -> bool {
+        self.state.lock().is_ok_and(|state| state.snapshot_pending && !state.closed)
+    }
+
+    fn send(&self, event: StreamEvent) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        if state.closed {
+            return false;
+        }
+        // end follows the durable commit; error closes this delivery attempt
+        // after a failed commit. Neither allows a later attach to miss its result.
+        if event.r#type == "end" || event.r#type == "error" {
+            state.closed = true;
+        }
+        Self::send_locked(&state, event)
+    }
+
+    fn send_locked(state: &RequestOutputState, mut event: StreamEvent) -> bool {
+        event.consumer_revision = state.consumer_revision;
+        match &state.channel {
+            Some(channel) => channel.send(event).map_err(|error| {
+                log::warn!("[VCPClient] Stream consumer delivery failed: {error}");
+            }).is_ok(),
+            None => true,
+        }
+    }
+
+    fn send_aurora(
+        &self,
+        buffer: &mut AuroraBuffer,
+        message_id: &str,
+        context: &Option<Value>,
+        finish_reason: Option<String>,
+        force_snapshot: bool,
+    ) {
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        if state.closed {
+            return;
+        }
+        let prepared = if state.snapshot_pending || force_snapshot || finish_reason.is_some() {
+            Some(buffer.prepare_snapshot_update())
+        } else {
+            buffer.prepare_delta_update()
+        };
+        let Some((update, commit)) = prepared else {
+            return;
+        };
+        let mut event = StreamEvent::aurora(message_id.to_string(), update, context.clone());
+        event.finish_reason = finish_reason;
+        if Self::send_locked(&state, event) {
+            buffer.commit_delivery(commit);
+            state.snapshot_pending = false;
+        }
+    }
+
+    fn close(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.closed = true;
+            state.channel = None;
+        }
+    }
+}
+
+fn request_output<R: Runtime>(
+    app: &AppHandle<R>,
+    key: &MessageKey,
+    channel: Option<Channel<StreamEvent>>,
+) -> Arc<RequestOutput> {
+    let output = app.try_state::<ActiveRequests>()
+        .and_then(|requests| requests.0.get(key).map(|entry| entry.output.clone()))
+        .unwrap_or_default();
+    let group = app.try_state::<ActiveGroupTurns>()
+        .and_then(|turns| turns.0.get(&key.topic).map(|entry| entry.value().clone()));
+    if let Some(group) = group {
+        if let Ok(mut current) = group.channel.lock() {
+            if current.is_none() {
+                *current = channel;
+            }
+            // Group rebinding and a new speaker's initial binding share this lock.
+            output.bind_initial(current.clone());
+        }
+    } else {
+        output.bind_initial(channel);
+    }
+    output
+}
+
+pub(crate) fn deliver_request_event<R: Runtime>(
+    app: &AppHandle<R>,
+    key: &MessageKey,
+    channel: Option<Channel<StreamEvent>>,
+    event: StreamEvent,
+) {
+    request_output(app, key, channel).send(event);
 }
 
 pub type ActiveRequestMap = Arc<DashMap<MessageKey, Arc<ActiveRequestEntry>>>;
@@ -468,7 +623,7 @@ impl ActiveRequests {
 pub struct ActiveRequestLease {
     requests: ActiveRequestMap,
     key: MessageKey,
-    attempt_id: uuid::Uuid,
+    entry: Arc<ActiveRequestEntry>,
 }
 
 impl ActiveRequestLease {
@@ -481,16 +636,18 @@ impl ActiveRequestLease {
         let entry = Arc::new(ActiveRequestEntry {
             attempt_id,
             cancellation_token: cancellation_token.clone(),
+            output: Arc::default(),
+            released: CancellationToken::new(),
         });
 
         match requests.entry(key.clone()) {
             Entry::Vacant(slot) => {
-                slot.insert(entry);
+                slot.insert(entry.clone());
                 Ok((
                     Self {
                         requests: requests.clone(),
                         key,
-                        attempt_id,
+                        entry,
                     },
                     cancellation_token,
                 ))
@@ -505,15 +662,22 @@ impl ActiveRequestLease {
 
 impl Drop for ActiveRequestLease {
     fn drop(&mut self) {
+        self.entry.output.close();
         if let Entry::Occupied(entry) = self.requests.entry(self.key.clone()) {
-            if entry.get().attempt_id == self.attempt_id {
+            if entry.get().attempt_id == self.entry.attempt_id {
                 entry.remove();
             }
         }
+        self.entry.released.cancel();
     }
 }
 
-type ActiveGroupTurnMap = Arc<DashMap<TopicKey, CancellationToken>>;
+struct ActiveGroupTurnEntry {
+    cancellation_token: CancellationToken,
+    channel: std::sync::Mutex<Option<Channel<StreamEvent>>>,
+}
+
+type ActiveGroupTurnMap = Arc<DashMap<TopicKey, Arc<ActiveGroupTurnEntry>>>;
 
 /// 每个 Topic 同时只允许一个群组回合，并由同一所有者承载回合取消状态。
 pub struct ActiveGroupTurns(ActiveGroupTurnMap);
@@ -531,7 +695,10 @@ impl ActiveGroupTurns {
 
         match self.0.entry(key.clone()) {
             Entry::Vacant(slot) => {
-                slot.insert(cancellation_token.clone());
+                slot.insert(Arc::new(ActiveGroupTurnEntry {
+                    cancellation_token: cancellation_token.clone(),
+                    channel: std::sync::Mutex::new(None),
+                }));
                 Ok(ActiveGroupTurnLease {
                     turns: self.0.clone(),
                     key,
@@ -549,9 +716,26 @@ impl ActiveGroupTurns {
         let Some(entry) = self.0.get(key) else {
             return false;
         };
-        entry.cancel();
+        entry.cancellation_token.cancel();
         drop(entry);
         true
+    }
+
+    fn attach_output(
+        &self,
+        requests: &ActiveRequests,
+        key: &TopicKey,
+        channel: Channel<StreamEvent>,
+    ) -> Result<(), String> {
+        let Some(turn) = self.0.get(key).map(|entry| entry.value().clone()) else {
+            return Ok(());
+        };
+        let mut current = turn.channel.lock().map_err(|error| error.to_string())?;
+        *current = Some(channel.clone());
+        for request in requests.0.iter().filter(|request| &request.key().topic == key) {
+            request.output.attach(channel.clone())?;
+        }
+        Ok(())
     }
 }
 
@@ -771,6 +955,14 @@ pub async fn perform_vcp_request_registered<R: Runtime>(
     let message_id = payload.message_id.clone();
     let context = payload.context.clone();
     let transport_request_id = payload.effective_transport_request_id().to_string();
+    let output = match message_key_from_context(&context, &message_id) {
+        Ok(key) => request_output(app, &key, stream_channel),
+        Err(_) => {
+            let output = Arc::new(RequestOutput::default());
+            output.bind_initial(stream_channel);
+            output
+        }
+    };
 
     // === 1. 数据验证和多模态资产转换 ===
     let mut messages = preprocess_multimodal_messages(app, payload.messages)
@@ -823,7 +1015,7 @@ pub async fn perform_vcp_request_registered<R: Runtime>(
             transport_request_id,
             context,
             cancellation_token,
-            stream_channel,
+            output,
             false,
             None,
             None,
@@ -838,7 +1030,7 @@ pub async fn perform_vcp_request_registered<R: Runtime>(
             message_id,
             context,
             cancellation_token,
-            stream_channel,
+            output,
         )
         .await
         .map_err(VcpRequestFailure::from)
@@ -1331,24 +1523,12 @@ async fn handle_streaming_request<R: Runtime>(
     transport_request_id: String,
     context: Option<Value>,
     cancellation_token: CancellationToken,
-    stream_channel: Option<Channel<StreamEvent>>,
+    output: Arc<RequestOutput>,
     is_resume: bool,
     last_event_index: Option<i64>,
     initial_content: Option<String>,
 ) -> Result<(Value, bool), VcpRequestFailure> {
-    let send_stream_event = |event: StreamEvent| -> bool {
-        if let Some(ref ch) = stream_channel {
-            if let Err(error) = ch.send(event) {
-                log::error!(
-                    "[VCPClient] Failed to send stream event for {}: {}",
-                    message_id,
-                    error
-                );
-                return false;
-            }
-        }
-        true
-    };
+    let send_stream_event = |event: StreamEvent| output.send(event);
 
     let message_id_inner = message_id.clone();
     let context_inner = context.clone();
@@ -1365,21 +1545,7 @@ async fn handle_streaming_request<R: Runtime>(
     let mut backoff = Duration::from_millis(500);
 
     let send_aurora_update = |buffer: &mut AuroraBuffer, finish_reason: Option<String>| {
-        let is_final = finish_reason.is_some();
-        let prepared = if is_final {
-            Some(buffer.prepare_snapshot_update())
-        } else {
-            buffer.prepare_delta_update()
-        };
-        let Some((update, commit)) = prepared else {
-            return;
-        };
-        let mut event =
-            StreamEvent::aurora(message_id_inner.clone(), update, context_inner.clone());
-        event.finish_reason = finish_reason;
-        if send_stream_event(event) {
-            buffer.commit_delivery(commit);
-        }
+        output.send_aurora(buffer, &message_id_inner, &context_inner, finish_reason, false);
     };
 
     let flush_aurora_parse = |buffer: &mut AuroraBuffer,
@@ -1431,6 +1597,15 @@ async fn handle_streaming_request<R: Runtime>(
 
     // 2. 状态机驱动循环
     loop {
+        if output.needs_snapshot() {
+            flush_aurora_parse(
+                &mut aurora_buffer,
+                &mut pending_aurora_chunk,
+                &mut last_aurora_parse,
+                true,
+            );
+            send_aurora_update(&mut aurora_buffer, None);
+        }
         match state {
             State::Init => {
                 if let Some(ref content) = initial_content {
@@ -1438,14 +1613,13 @@ async fn handle_streaming_request<R: Runtime>(
                     let _ = aurora_buffer.process_queue();
 
                     // 暖接续只发送一次 helper 权威 Snapshot，并以 reset frame 建立新序列基线。
-                    let (baseline, commit) = aurora_buffer.prepare_snapshot_update();
-                    if send_stream_event(StreamEvent::aurora(
-                        message_id_inner.clone(),
-                        baseline,
-                        context_inner.clone(),
-                    )) {
-                        aurora_buffer.commit_delivery(commit);
-                    }
+                    output.send_aurora(
+                        &mut aurora_buffer,
+                        &message_id_inner,
+                        &context_inner,
+                        None,
+                        true,
+                    );
                 }
                 if is_resume {
                     state = State::Resuming;
@@ -1528,7 +1702,15 @@ async fn handle_streaming_request<R: Runtime>(
                                 }
                                 Ok(resp) => {
                                     let status = resp.status();
-                                    let text = resp.text().await.unwrap_or_default();
+                                    let text = tokio::select! {
+                                        _ = cancellation_token.cancelled() => {
+                                            return Ok((json!({
+                                                "fullContent": aurora_buffer.full_text,
+                                                "finishReason": "cancelled_by_user",
+                                            }), true));
+                                        }
+                                        text = resp.text() => text.unwrap_or_default(),
+                                    };
                                     log::warn!("[VCPClient] VCP server rejected request: {} - {}", status, text);
                                     return Err(streaming_failure(
                                         &mut aurora_buffer,
@@ -1636,6 +1818,15 @@ async fn handle_streaming_request<R: Runtime>(
                                         Some("cancelled_by_user".to_string()),
                                     );
                                     return Ok((json!({ "fullContent": aurora_buffer.full_text, "finishReason": Some("cancelled_by_user") }), true));
+                                }
+                                _ = output.changed.notified() => {
+                                    flush_aurora_parse(
+                                        &mut aurora_buffer,
+                                        &mut pending_aurora_chunk,
+                                        &mut last_aurora_parse,
+                                        true,
+                                    );
+                                    send_aurora_update(&mut aurora_buffer, None);
                                 }
                                 _ = tokio::time::sleep(pending_flush_delay), if !pending_aurora_chunk.is_empty() => {
                                     flush_aurora_parse(
@@ -1806,6 +1997,15 @@ async fn handle_streaming_request<R: Runtime>(
                                         Some("cancelled_by_user".to_string()),
                                     );
                                     return Ok((json!({ "fullContent": aurora_buffer.full_text, "finishReason": Some("cancelled_by_user") }), true));
+                                }
+                                _ = output.changed.notified() => {
+                                    flush_aurora_parse(
+                                        &mut aurora_buffer,
+                                        &mut pending_aurora_chunk,
+                                        &mut last_aurora_parse,
+                                        true,
+                                    );
+                                    send_aurora_update(&mut aurora_buffer, None);
                                 }
                                 _ = tokio::time::sleep(pending_flush_delay), if !pending_aurora_chunk.is_empty() => {
                                     flush_aurora_parse(
@@ -1987,13 +2187,15 @@ async fn handle_non_streaming_request(
     message_id: String,
     context: Option<Value>,
     cancellation_token: CancellationToken,
-    stream_channel: Option<Channel<StreamEvent>>,
+    output: Arc<RequestOutput>,
 ) -> Result<(Value, bool), String> {
-    let send_stream_event = |event: StreamEvent| {
-        if let Some(ref ch) = stream_channel {
-            let _ = ch.send(event);
-        }
-    };
+    let send_stream_event = |event: StreamEvent| { output.send(event); };
+    let cancelled_result = || (json!({
+        "response": Value::Null,
+        "fullContent": "",
+        "finishReason": "cancelled_by_user",
+        "context": context,
+    }), true);
 
     let request_future = client
         .post(final_url)
@@ -2006,15 +2208,7 @@ async fn handle_non_streaming_request(
         _ = cancellation_token.cancelled() => {
             log::warn!("[VCPClient] Non-streaming request aborted before response for message: {}", message_id);
             // 用户取消由上层统一 Finalizer 持久化并发送唯一终态事件。
-            return Ok((
-                json!({
-                    "response": serde_json::Value::Null,
-                    "fullContent": "",
-                    "finishReason": "cancelled_by_user",
-                    "context": context
-                }),
-                true,
-            ));
+            return Ok(cancelled_result());
         }
         res = request_future => {
             match res {
@@ -2029,15 +2223,18 @@ async fn handle_non_streaming_request(
 
     if !response.status().is_success() {
         let status = response.status();
-        let text = response.text().await.unwrap_or_default();
+        let text = tokio::select! {
+            _ = cancellation_token.cancelled() => return Ok(cancelled_result()),
+            text = response.text() => text.unwrap_or_default(),
+        };
         let err_msg = format!("VCP服务器错误: {} - {}", status, text);
         return Err(err_msg);
     }
 
-    let vcp_response = response
-        .json::<Value>()
-        .await
-        .map_err(|error| format!("JSON解析失败: {error}"))?;
+    let vcp_response = tokio::select! {
+        _ = cancellation_token.cancelled() => return Ok(cancelled_result()),
+        value = response.json::<Value>() => value.map_err(|error| format!("JSON解析失败: {error}"))?,
+    };
 
     // 从标准的 OpenAI 格式中提取文本和结束原因
     let choices = vcp_response["choices"].as_array();
@@ -2090,7 +2287,8 @@ async fn handle_non_streaming_request(
 /// 通过完整消息身份立即取消对应 outer request 的共享取消域
 #[tauri::command]
 #[allow(non_snake_case)]
-pub fn interruptRequest(
+pub async fn interruptRequest(
+    app: AppHandle,
     state: tauri::State<'_, ActiveRequests>,
     owner_id: String,
     owner_type: String,
@@ -2106,23 +2304,34 @@ pub fn interruptRequest(
         message_id,
         state.0.len()
     );
-    if state.cancel(&key)? {
-        log::info!(
-            "[VCPClient] Found AbortController for messageId: {}, aborting...",
-            message_id
-        );
-        log::info!(
-            "[VCPClient] Request interrupted for messageId: {}. Active requests: {}",
-            message_id,
-            state.0.len()
-        );
-        Ok(json!({"success": true, "message": format!("Request {} interrupted", message_id)}))
-    } else {
-        log::warn!(
-            "[VCPClient] No active request found for messageId: {}",
-            message_id
-        );
-        Err(format!("Request {} not found", message_id))
+    let entry = state.0.get(&key).map(|entry| entry.value().clone());
+    if let Some(entry) = &entry {
+        entry.cancellation_token.cancel();
+    }
+    let settlement = async {
+        if let Some(entry) = entry {
+            entry.released.cancelled().await;
+        }
+        let db = app.state::<DbState>();
+        let reason: Option<Option<String>> = sqlx::query_scalar(
+            "SELECT finish_reason FROM messages WHERE owner_type = ? AND owner_id = ? AND topic_id = ? AND msg_id = ? AND deleted_at IS NULL",
+        )
+        .bind(&key.topic.owner_type)
+        .bind(&key.topic.owner_id)
+        .bind(&key.topic.topic_id)
+        .bind(&key.msg_id)
+        .fetch_optional(&db.pool)
+        .await
+        .map_err(|error| error.to_string())?;
+        match reason.flatten() {
+            Some(reason) => Ok(json!({ "success": true, "status": "completed", "finishReason": reason })),
+            None => Err(format!("Request {} is no longer running but has no committed terminal result", message_id)),
+        }
+    };
+    // Cancelling this wait never aborts the request owner or its commit.
+    match tokio::time::timeout(Duration::from_secs(5), settlement).await {
+        Ok(result) => result,
+        Err(_) => Ok(json!({ "success": true, "status": "cancelling" })),
     }
 }
 
@@ -2204,7 +2413,18 @@ pub struct ActiveGeneration {
 pub async fn get_active_generations(
     app: tauri::AppHandle,
     active_requests: tauri::State<'_, ActiveRequests>,
+    stream_channel: Channel<StreamEvent>,
 ) -> Result<Vec<ActiveGeneration>, String> {
+    // A group turn can be assembling its next speaker while no generation row
+    // exists. Install the consumer on the turn before reading pending messages.
+    let turns = app.state::<ActiveGroupTurns>();
+    let turn_keys = turns.0.iter().map(|entry| entry.key().clone()).collect::<Vec<_>>();
+    for key in turn_keys {
+        turns.attach_output(&active_requests, &key, stream_channel.clone())?;
+    }
+    for request in active_requests.0.iter() {
+        request.output.attach(stream_channel.clone())?;
+    }
     let db = app.state::<DbState>();
     let rows = sqlx::query(
         "SELECT ag.msg_id, ag.topic_id, ag.owner_id, ag.owner_type, ag.created_at, \
@@ -2226,11 +2446,8 @@ pub async fn get_active_generations(
         let topic_id: String = row.get("topic_id");
         let owner_id: String = row.get("owner_id");
         let owner_type: String = row.get("owner_type");
-        let key = MessageKey::new(TopicKey::new(&owner_type, &owner_id, &topic_id), &msg_id);
-        // 过滤掉当前正在活跃运行的后台流式任务，它们由 sse helper 代理，并不是“被异常打断”的
-        if active_requests.0.contains_key(&key) {
-            continue;
-        }
+        // A replacement WebView needs pending messages even when their request
+        // still runs. Recovery attaches its output instead of issuing another request.
         list.push(ActiveGeneration {
             msg_id,
             topic_id,
@@ -2367,19 +2584,28 @@ pub async fn recover_active_generation<R: Runtime>(
     let key = MessageKey::new(TopicKey::new(&owner_type, &owner_id, &topic_id), &msg_id);
     let transport_request_id = message_transport_request_id(&key);
 
-    // Recovery owns one atomic attempt from inspection through terminal commit.
-    // This removes the old recover -> resume two-IPC claim gap.
-    let (_recovery_lease, _recovery_cancellation_token) =
+    if let Some(turns) = app.try_state::<ActiveGroupTurns>() {
+        turns.attach_output(&active_requests, &key.topic, stream_channel.clone())?;
+    }
+
+    // Keep the live attempt and replace only its consumer. If finalization won
+    // the output lock first, wait for that lease to leave before reading its
+    // durable result; do not claim a second attempt beside a closing one.
+    let (_recovery_lease, _recovery_cancellation_token) = loop {
         match ActiveRequestLease::try_acquire(active_requests.0.clone(), key.clone()) {
-            Ok(claim) => claim,
+            Ok(claim) => break claim,
             Err(_) => {
-                log::info!(
-                    "[VCPClient] Active generation {} already has an owner.",
-                    msg_id
-                );
-                return Ok(json!({ "status": "already_running" }));
+                let Some(entry) = active_requests.0.get(&key).map(|entry| entry.value().clone()) else {
+                    continue;
+                };
+                if entry.output.attach(stream_channel.clone())? {
+                    return Ok(json!({ "status": "attached" }));
+                }
+                entry.released.cancelled().await;
             }
-        };
+        }
+    };
+    request_output(&app, &key, Some(stream_channel.clone()));
 
     let db = app.state::<DbState>();
     let pending: Option<(Option<String>,)> = sqlx::query_as(
@@ -2659,7 +2885,7 @@ async fn resume_claimed_generation<R: Runtime>(
         "agentId": if owner_type == "agent" { Some(&owner_id) } else { None },
     });
 
-    let (res, is_aborted) = match handle_streaming_request(
+    let (mut res, is_aborted) = match handle_streaming_request(
         app,
         client,
         "",
@@ -2669,7 +2895,7 @@ async fn resume_claimed_generation<R: Runtime>(
         transport_request_id,
         Some(context.clone()),
         cancellation_token,
-        Some(stream_channel.clone()),
+        request_output(app, key, Some(stream_channel.clone())),
         true,
         last_event_index,
         initial_content.clone(),
@@ -2708,7 +2934,7 @@ async fn resume_claimed_generation<R: Runtime>(
     };
 
     log::info!("[VCPClient] Claimed recovery completed. Finalizing message.");
-    crate::vcp_modules::chat::message_service::finalize_stream_message(
+    let committed_content = crate::vcp_modules::chat::message_service::finalize_stream_message(
         app.clone(),
         &pool,
         key,
@@ -2720,12 +2946,134 @@ async fn resume_claimed_generation<R: Runtime>(
     )
     .await?;
 
+    res["fullContent"] = json!(committed_content);
     Ok(res)
 }
 
 #[cfg(test)]
 mod active_request_tests {
     use super::*;
+
+    fn event_channel() -> (Channel<StreamEvent>, tokio::sync::mpsc::UnboundedReceiver<Value>) {
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        let channel = Channel::new(move |body| {
+            let _ = sender.send(body.deserialize::<Value>()?);
+            Ok(())
+        });
+        (channel, receiver)
+    }
+
+    #[tokio::test]
+    #[cfg(not(target_os = "android"))]
+    async fn idle_stream_handoff_sends_a_snapshot_without_restarting_http() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let release_server = CancellationToken::new();
+        let server_release = release_server.clone();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = vec![0; 4096];
+            let length = socket.read(&mut request).await.unwrap();
+            assert!(std::str::from_utf8(&request[..length]).unwrap().starts_with("POST "));
+            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\ndata: {\"choices\":[{\"delta\":{\"content\":\"<think>first\"}}]}\n\n").await.unwrap();
+            server_release.cancelled().await;
+            assert!(tokio::time::timeout(Duration::from_millis(10), listener.accept()).await.is_err());
+        });
+        let app = tauri::test::mock_app();
+        let output = Arc::new(RequestOutput::default());
+        let (old_channel, mut old_events) = event_channel();
+        output.bind_initial(Some(old_channel));
+        let cancellation = CancellationToken::new();
+        let request_app = app.handle().clone();
+        let request_output = output.clone();
+        let request_cancel = cancellation.clone();
+        let request = tokio::spawn(async move {
+            handle_streaming_request(
+                &request_app, Client::new(), &endpoint, "", json!({}),
+                "message".to_string(), "transport".to_string(), None,
+                request_cancel, request_output, false, None, None,
+            ).await
+        });
+        let first = tokio::time::timeout(Duration::from_secs(2), old_events.recv()).await.unwrap().unwrap();
+        let (new_channel, mut new_events) = event_channel();
+        assert!(output.attach(new_channel).unwrap());
+        let snapshot = tokio::time::timeout(Duration::from_secs(1), new_events.recv()).await.unwrap().unwrap();
+        assert_eq!(snapshot["aurora"]["kind"], "snapshot");
+        assert_eq!(snapshot["aurora"]["content"], "<think>first");
+        assert!(snapshot["consumerRevision"].as_u64().unwrap() > first["consumerRevision"].as_u64().unwrap());
+        assert!(old_events.try_recv().is_err());
+        cancellation.cancel();
+        let (result, aborted) = tokio::time::timeout(Duration::from_secs(1), request).await.unwrap().unwrap().unwrap();
+        assert!(aborted);
+        assert_eq!(result["fullContent"], "<think>first");
+        release_server.cancel();
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn group_handoff_covers_the_current_speaker_and_the_gap_before_the_next() {
+        let app = tauri::test::mock_app();
+        app.manage(ActiveRequests::default());
+        app.manage(ActiveGroupTurns::default());
+        let requests = app.state::<ActiveRequests>();
+        let turns = app.state::<ActiveGroupTurns>();
+        let topic = TopicKey::new("group", "group", "topic");
+        let _turn = turns.try_acquire(topic.clone()).unwrap();
+        let first_key = MessageKey::new(topic.clone(), "first");
+        let (first_lease, _) = ActiveRequestLease::try_acquire(requests.0.clone(), first_key.clone()).unwrap();
+        let (original, mut original_events) = event_channel();
+        deliver_request_event(app.handle(), &first_key, Some(original.clone()), StreamEvent::thinking("first".into(), None));
+        assert_eq!(original_events.recv().await.unwrap()["messageId"], "first");
+        let (replacement, mut replacement_events) = event_channel();
+        turns.attach_output(&requests, &topic, replacement).unwrap();
+        deliver_request_event(app.handle(), &first_key, Some(original.clone()), StreamEvent::end("first".into(), None, Some("completed".into()), Some("first result".into()), None, None, None));
+        assert_eq!(replacement_events.recv().await.unwrap()["type"], "end");
+        assert!(!first_lease.entry.output.attach(original.clone()).unwrap());
+        let released = first_lease.entry.released.clone();
+        drop(first_lease);
+        assert!(released.is_cancelled());
+
+        let (gap_replacement, mut gap_events) = event_channel();
+        turns.attach_output(&requests, &topic, gap_replacement).unwrap();
+        let second_key = MessageKey::new(topic, "second");
+        let (_second_lease, _) = ActiveRequestLease::try_acquire(requests.0.clone(), second_key.clone()).unwrap();
+        deliver_request_event(app.handle(), &second_key, Some(original), StreamEvent::thinking("second".into(), None));
+        assert_eq!(gap_events.recv().await.unwrap()["messageId"], "second");
+        assert!(original_events.try_recv().is_err());
+        assert!(replacement_events.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn cancellation_during_non_streaming_body_does_not_wait_for_body_completion() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let (headers_sent, headers_ready) = tokio::sync::oneshot::channel();
+        let release_server = CancellationToken::new();
+        let server_release = release_server.clone();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0; 4096];
+            socket.read(&mut request).await.unwrap();
+            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 1000\r\n\r\n{").await.unwrap();
+            let _ = headers_sent.send(());
+            server_release.cancelled().await;
+        });
+        let cancellation = CancellationToken::new();
+        let request_cancel = cancellation.clone();
+        let request = tokio::spawn(async move {
+            handle_non_streaming_request(Client::new(), &endpoint, "", json!({}), "message".into(), None, request_cancel, Arc::default()).await
+        });
+        tokio::time::timeout(Duration::from_secs(1), headers_ready).await.unwrap().unwrap();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        cancellation.cancel();
+        let (result, aborted) = tokio::time::timeout(Duration::from_secs(1), request).await.unwrap().unwrap().unwrap();
+        assert!(aborted);
+        assert_eq!(result["finishReason"], "cancelled_by_user");
+        release_server.cancel();
+        server.await.unwrap();
+    }
 
     fn message_key(message_id: &str) -> MessageKey {
         MessageKey::new(TopicKey::new("agent", "agent-a", "topic-a"), message_id)
@@ -3028,6 +3376,8 @@ mod active_request_tests {
             Arc::new(ActiveRequestEntry {
                 attempt_id: new_attempt_id,
                 cancellation_token: CancellationToken::new(),
+                output: Arc::default(),
+                released: CancellationToken::new(),
             }),
         );
 

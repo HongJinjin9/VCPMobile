@@ -473,25 +473,33 @@ export const useChatHistoryStore = defineStore("chatHistory", () => {
   /**
    * 构造群聊/单聊共用的流式事件 Channel 接线
    */
-  const makeStreamChannel = (key: ConversationKey) => {
+  const makeStreamChannel = (key: ConversationKey | null) => {
     const streamChannel = new Channel<StreamEventDto>();
-    streamChannel.onmessage = (event) => streamStore.processStreamEvent(event, {
-      onMessageCreated: (msg, tid) => {
-        if (tid === key.topicId && canCommitConversation(key) && !currentChatHistory.value.some(m => m.id === msg.id)) {
-          currentChatHistory.value.push(msg);
-          currentChatHistory.value = mergeHistoryWindow(
-            currentChatHistory.value,
-            [],
-            false,
-          );
-        }
-      },
-      onStreamFinished: (_mid, tid) => {
-        if (tid === key.topicId && canCommitConversation(key)) {
-          summarizeTopic();
-        }
-      }
-    });
+    streamChannel.onmessage = (event) => {
+      const target = key ?? captureLoadedConversation();
+      const canCommitEvent = () => target !== null
+        && event.context?.ownerId === target.ownerId
+        && event.context?.ownerType === target.ownerType
+        && event.context?.topicId === target.topicId
+        && canCommitConversation(target);
+      return streamStore.processStreamEvent(event, {
+        onMessageCreated: (msg) => {
+          if (canCommitEvent() && !currentChatHistory.value.some(m => m.id === msg.id)) {
+            currentChatHistory.value.push(msg);
+            currentChatHistory.value = mergeHistoryWindow(
+              currentChatHistory.value,
+              [],
+              false,
+            );
+          }
+        },
+        onStreamFinished: () => {
+          if (canCommitEvent()) {
+            summarizeTopic();
+          }
+        },
+      });
+    };
     return streamChannel;
   };
 
@@ -1050,6 +1058,7 @@ export const useChatHistoryStore = defineStore("chatHistory", () => {
     deleteMessage,
     deleteAttachment,
     triggerGeneration,
+    makeStreamChannel,
     inviteGroupMember,
     summarizeTopic,
     captureMessageActionKey,

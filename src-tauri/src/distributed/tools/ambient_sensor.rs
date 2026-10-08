@@ -13,7 +13,7 @@ impl StreamingTool for AmbientSensorTool {
     fn manifest(&self) -> ToolManifest {
         ToolManifest {
             name: "MobileAmbient".to_string(),
-            description: "读取设备所处的物理环境光照度 (Lux) 与气压值 (hPa)，推算环境场景。"
+            description: "按需读取可用的环境传感器；气压以 hPa 返回，未公开的光照度或缺失硬件明确说明。"
                 .to_string(),
             display_name: "物理环境传感器".to_string(),
             placeholder: Some("{{MobileAmbient}}".to_string()),

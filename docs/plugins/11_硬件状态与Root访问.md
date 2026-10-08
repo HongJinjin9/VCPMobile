@@ -3,7 +3,7 @@ id: PLUGIN-HARDWARE-011
 title: 硬件状态与 Root 访问
 description: 设备硬件状态采集（CPU 热分级、GPU 型号、网络连接）与 Root 权限访问体系的实现细节。v1.0.3 新增
 version: 1.1.3
-date: 2026-08-10
+date: 2026-10-09
 related_files:
   - src-tauri/plugins/vcp-mobile/src/system.rs
   - src-tauri/plugins/vcp-mobile/android/src/main/java/com/vcp/mobile/VcpMobilePlugin.kt
@@ -14,6 +14,8 @@ related_files:
 ---
 
 # 硬件状态与 Root 访问
+
+> 当前 iOS 设备查询位于 [NativeDevice.swift](../../src-tauri/plugins/vcp-mobile/ios/Sources/NativeDevice.swift)，传感器请求位于 [NativeSensors.swift](../../src-tauri/plugins/vcp-mobile/ios/Sources/NativeSensors.swift)。前者提供 UIDevice/ProcessInfo/Mach 的设备、CPU/内存/热状态，Metal 设备名称及按次 NWPath/接口地址快照；后者持有串行 CoreLocation/CoreMotion 采样。`get_device_snapshot` 是 Rust 内部设备工具入口，不是前端能力查询。无法取得的字段由共享 DTO 的 `unavailable` 说明；下文 EGL、sysfs、ConnectivityManager 与 Root 流程描述 Android 实现，host fixture 不进入 iOS 分支。
 
 ## 1. 功能概述
 
@@ -164,9 +166,11 @@ Rust 解包 ThermalResponse { status } → Result<String, String>
 pub struct GpuStatus {
     pub renderer: String,
     pub restricted: bool,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub unavailable: BTreeMap<String, String>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_gpu_status<R: Runtime>(app: AppHandle<R>) -> Result<GpuStatus, String>;
 ```
 
@@ -175,6 +179,7 @@ pub fn get_gpu_status<R: Runtime>(app: AppHandle<R>) -> Result<GpuStatus, String
 | 前端命令 | `plugin:vcp-mobile\|get_gpu_status` |
 | 参数 | 无 |
 | 返回值 | `GpuStatus { renderer, restricted }` —— `restricted` 固定为 `true`，表示 GPU 信息受限（无 sysfs 功耗/温度数据） |
+| iOS 分支 | Metal 返回设备名称；`unavailable.usagePercent` 说明系统不提供全机 GPU 实时利用率，未取得 Metal 设备则报错 |
 | 桌面端行为 | 返回 `{ renderer: "PC Mock GPU", restricted: true }` |
 
 ### 4.3 EGL 临时上下文技术
@@ -252,12 +257,18 @@ fun getGpuRenderer(): String {
 pub struct NetworkStatus {
     pub connected: bool,
     pub r#type: String,
-    pub down_speed_kbps: i32,
-    pub up_speed_kbps: i32,
-    pub ip: String,
+    pub down_speed_kbps: Option<i32>,
+    pub up_speed_kbps: Option<i32>,
+    pub ip: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_expensive: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_constrained: Option<bool>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub unavailable: BTreeMap<String, String>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_network_status<R: Runtime>(app: AppHandle<R>) -> Result<NetworkStatus, String>;
 ```
 
@@ -266,6 +277,7 @@ pub fn get_network_status<R: Runtime>(app: AppHandle<R>) -> Result<NetworkStatus
 | 前端命令 | `plugin:vcp-mobile\|get_network_status` |
 | 参数 | 无 |
 | 返回值 | `NetworkStatus` JSON 对象（camelCase 序列化） |
+| iOS 分支 | 等待一次真实 NWPath 回调后返回介质、连接、受限/计费路径与活动接口地址；上下行速率为缺失并说明原因。临时 monitor 在完成/超时后取消，独立于生命周期 Channel 的长期连通监听 |
 | 桌面端行为 | 返回 `{ connected: true, type: "以太网", downSpeedKbps: 100000, upSpeedKbps: 100000, ip: "127.0.0.1" }` |
 
 ### 5.3 网络类型与带宽检测

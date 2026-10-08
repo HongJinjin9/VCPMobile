@@ -465,6 +465,32 @@ Denies the get_network_status command without any pre-configured scope.
 <tr>
 <td>
 
+`vcp-mobile:allow-get-notification-permission`
+
+</td>
+<td>
+
+Enables the get_notification_permission command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`vcp-mobile:deny-get-notification-permission`
+
+</td>
+<td>
+
+Denies the get_notification_permission command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `vcp-mobile:allow-get-pending-notification`
 
 </td>
@@ -562,6 +588,32 @@ Enables the open_file_native command without any pre-configured scope.
 <td>
 
 Denies the open_file_native command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`vcp-mobile:allow-open-notification-settings`
+
+</td>
+<td>
+
+Enables the open_notification_settings command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`vcp-mobile:deny-open-notification-settings`
+
+</td>
+<td>
+
+Denies the open_notification_settings command without any pre-configured scope.
 
 </td>
 </tr>
@@ -796,6 +848,32 @@ Enables the request_notification_listener_permission command without any pre-con
 <td>
 
 Denies the request_notification_listener_permission command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`vcp-mobile:allow-request-notification-permission`
+
+</td>
+<td>
+
+Enables the request_notification_permission command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`vcp-mobile:deny-request-notification-permission`
+
+</td>
+<td>
+
+Denies the request_notification_permission command without any pre-configured scope.
 
 </td>
 </tr>

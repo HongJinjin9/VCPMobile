@@ -1416,7 +1416,7 @@ pub async fn finalize_stream_message<R: tauri::Runtime>(
     finish_reason: Option<String>,
     stream_channel: Option<Channel<crate::vcp_modules::vcp_client::StreamEvent>>,
     agent_id: Option<String>,
-) -> Result<(), String> {
+) -> Result<String, String> {
     finalize_stream_message_inner(
         app_handle,
         pool,
@@ -1440,7 +1440,7 @@ async fn finalize_stream_message_inner<R: tauri::Runtime>(
     finish_reason: Option<String>,
     stream_channel: Option<Channel<crate::vcp_modules::vcp_client::StreamEvent>>,
     agent_id: Option<String>,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let owner_id = message_key.topic.owner_id.as_str();
     let owner_type = message_key.topic.owner_type.as_str();
     let topic_id = message_key.topic.topic_id.as_str();
@@ -1512,34 +1512,36 @@ async fn finalize_stream_message_inner<R: tauri::Runtime>(
                     (Some(blocks), start_timestamp, Some(updated_at))
                 }
                 Err(error) => {
-                    if let Some(chan) = &stream_channel {
-                        let mut event = crate::vcp_modules::vcp_client::StreamEvent::error(
-                            message_id.to_string(),
-                            context.clone(),
-                            format!("终态保存失败: {}", error),
-                        );
-                        event.content = Some(final_content.clone());
-                        let _ = chan.send(event);
-                    }
+                    let mut event = crate::vcp_modules::vcp_client::StreamEvent::error(
+                        message_id.to_string(),
+                        context.clone(),
+                        format!("终态保存失败: {}", error),
+                    );
+                    event.content = Some(final_content.clone());
+                    crate::vcp_modules::vcp_client::deliver_request_event(
+                        &app_handle, message_key, stream_channel.clone(), event,
+                    );
                     return Err(error);
                 }
             }
         };
 
-    if let Some(chan) = stream_channel {
+    {
         let event = crate::vcp_modules::vcp_client::StreamEvent::end(
             message_id.to_string(),
             context,
             Some(terminal_reason),
-            Some(final_content),
+            Some(final_content.clone()),
             end_blocks,
             Some(end_timestamp),
             topic_updated_at,
         );
-        let _ = chan.send(event);
+        crate::vcp_modules::vcp_client::deliver_request_event(
+            &app_handle, message_key, stream_channel, event,
+        );
     }
 
-    Ok(())
+    Ok(final_content)
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "tauri-plugin-vcp-mobile",
-    platforms: [.iOS(.v15)],
+    platforms: [.iOS("26.0")],
     products: [
         .library(
             name: "tauri-plugin-vcp-mobile",

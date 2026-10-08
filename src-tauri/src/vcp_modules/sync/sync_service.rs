@@ -42,6 +42,9 @@ const WS_OPERATION_TIMEOUT: Duration = Duration::from_secs(5);
 const PHASE_RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
 const FINAL_ACK_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_SYNC_RETRIES: u32 = 3;
+// Bound how long a caller waits, not the lifetime of already accepted DB writes.
+// A session which exceeds this budget remains owned until its real drain exits.
+const SYNC_STOP_WAIT: Duration = Duration::from_secs(5);
 #[cfg(target_os = "android")]
 const SYNC_GUARDIAN_LABEL: &str = "[数据同步] VCP Mobile";
 type RoutedSyncCommand = (u64, mpsc::UnboundedSender<SyncCommand>);
@@ -1313,7 +1316,7 @@ fn parse_sync_endpoint(
 
 fn endpoint_has_loopback_host(endpoint: &url::Url) -> bool {
     match endpoint.host() {
-        Some(url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Domain(host)) => host.trim_end_matches('.').eq_ignore_ascii_case("localhost"),
         Some(url::Host::Ipv4(address)) => address.is_loopback(),
         Some(url::Host::Ipv6(address)) => address.is_loopback(),
         None => false,
@@ -1322,7 +1325,7 @@ fn endpoint_has_loopback_host(endpoint: &url::Url) -> bool {
 
 fn build_sync_session_config(
     settings: &Settings,
-    is_android: bool,
+    is_mobile: bool,
 ) -> Result<SyncSessionConfig, SyncConfigValidationError> {
     let mut ws_endpoint =
         parse_sync_endpoint(&settings.sync_server_url, "WebSocket URL", &["ws", "wss"])?;
@@ -1343,12 +1346,12 @@ fn build_sync_session_config(
             "sync endpoint contains an unsupported query or fragment",
         ));
     }
-    if is_android
+    if is_mobile
         && (endpoint_has_loopback_host(&ws_endpoint) || endpoint_has_loopback_host(&http_endpoint))
     {
         return Err(SyncConfigValidationError::new(
             "CONFIG_LOOPBACK_ON_MOBILE",
-            "sync endpoint resolves to the Android device loopback interface",
+            "sync endpoint points to this mobile device rather than the configured sync server",
         ));
     }
 
@@ -3027,16 +3030,6 @@ async fn run_sync_session(
     if let Some(lease) = sync_guardian_lease {
         let _ = lease.release();
     }
-    let sync_state = app_handle.state::<SyncState>();
-    let _owner_commit = sync_state.owner_commit.lock().await;
-    if sync_state.current_session_id.load(Ordering::SeqCst) == session_id {
-        sync_state.ws_sender.clear_if_owner(session_id);
-        {
-            let mut logger_guard = sync_state.current_logger.write().unwrap();
-            *logger_guard = None;
-        }
-        *sync_state.current_log_path.write().await = None;
-    }
     shutdown_result
 }
 
@@ -3196,8 +3189,24 @@ fn emit_operator_sync_log<R: Runtime>(
 
 #[tauri::command]
 pub async fn stop_sync(
-    #[allow(unused_variables)] handle: AppHandle,
+    handle: AppHandle,
     state: State<'_, SyncState>,
+) -> Result<(), String> {
+    stop_sync_session(&handle, &state, false).await
+}
+
+#[cfg(target_os = "ios")]
+pub(crate) async fn suspend_sync_for_background(handle: &AppHandle) -> Result<(), String> {
+    let Some(state) = handle.try_state::<SyncState>() else {
+        return Ok(());
+    };
+    stop_sync_session(handle, &state, true).await
+}
+
+async fn stop_sync_session(
+    handle: &AppHandle,
+    state: &SyncState,
+    notify_background: bool,
 ) -> Result<(), String> {
     let _lifecycle_guard = state.lifecycle.lock().await;
 
@@ -3210,12 +3219,39 @@ pub async fn stop_sync(
         state.ws_sender.clear();
     }
 
-    let session = state.session.lock().await.take();
-    let join_result = if let Some(session) = session {
-        cancel_and_join_session(session).await
+    let mut owned_session = state.session.lock().await;
+    let stopping_session_id = owned_session
+        .as_ref()
+        .filter(|session| !session.join_handle.is_finished())
+        .map(|session| session.session_id);
+    if let Some(session_id) = stopping_session_id {
+        *state.connection_status.write().await = "stopping".to_string();
+        if notify_background {
+            emit_operator_sync_log(handle, session_id, "warning", "应用已切到后台，正在结束手动同步");
+        }
+    }
+    let join_result = if let Some(session) = owned_session.as_mut() {
+        match cancel_and_join_session(session, SYNC_STOP_WAIT).await {
+            Some(result) => result,
+            None => {
+                // Keep the handle in SyncState. Starting another session must not
+                // race the previous session's accepted writes/finalizer.
+                let status = state.connection_status.read().await;
+                if notify_background && status.as_str() == "stopping" {
+                    emit_sync_interruption(handle, session.session_id, "SYNC_STOP_PENDING");
+                }
+                drop(status);
+                return Err(encode_sync_command_error(
+                    "SYNC_STOP_PENDING",
+                    "同步仍在完成已接受的数据写入，请稍后重试停止或同步。",
+                ));
+            }
+        }
     } else {
         Ok(())
     };
+    owned_session.take();
+    drop(owned_session);
 
     {
         let mut guard = state.connection_status.write().await;
@@ -3238,13 +3274,43 @@ pub async fn stop_sync(
     Ok(())
 }
 
-async fn cancel_and_join_session(session: SyncSessionHandle) -> Result<(), String> {
+async fn finish_sync_session(handle: &AppHandle, session_id: u64, outcome: &Result<(), String>) {
+    let state = handle.state::<SyncState>();
+    let _owner_commit = state.owner_commit.lock().await;
+    // This runs inside the owned JoinHandle, after child cancellation and write
+    // drain. start_manual_sync cannot replace that handle until this also exits.
+    state.ws_sender.clear_if_owner(session_id);
+    match state.current_logger.write() {
+        Ok(mut logger) => *logger = None,
+        Err(_) => log::error!("[SyncService] Logger state poisoned during final cleanup"),
+    }
+    *state.current_log_path.write().await = None;
+    let mut status = state.connection_status.write().await;
+    if status.as_str() == "stopping" {
+        *status = "disconnected".to_string();
+        drop(status);
+        emit_sync_interruption(handle, session_id, if outcome.is_ok() { "SYNC_STOPPED" } else { "SYNC_STOP_FAILED" });
+    }
+}
+
+fn emit_sync_interruption(handle: &AppHandle, session_id: u64, code: &str) {
+    let error = build_local_error_payload(code, Vec::new(), None);
+    let _ = handle.emit(
+        "vcp-sync-status",
+        json!({ "sessionId": session_id, "status": "error", "source": "Sync", "error": error }),
+    );
+}
+
+async fn cancel_and_join_session(
+    session: &mut SyncSessionHandle,
+    wait: Duration,
+) -> Option<Result<(), String>> {
     log::info!("[SyncService] Cancelling session {}", session.session_id);
     session.cancel_token.cancel();
-    session
-        .join_handle
+    tokio::time::timeout(wait, &mut session.join_handle)
         .await
-        .map_err(|error| format!("同步会话退出失败: {error}"))?
+        .ok()
+        .map(|result| result.map_err(|error| format!("同步会话退出失败: {error}")).and_then(|result| result))
 }
 
 #[tauri::command]
@@ -3253,6 +3319,14 @@ pub async fn start_manual_sync(
     state: State<'_, SyncState>,
 ) -> Result<u64, String> {
     let _lifecycle_guard = state.lifecycle.lock().await;
+
+    #[cfg(target_os = "ios")]
+    if !crate::vcp_modules::lifecycle_manager::is_app_in_foreground(&handle) {
+        return Err(encode_sync_command_error(
+            "SYNC_BACKGROUND_STOPPED",
+            "请返回应用前台后手动开始同步。",
+        ));
+    }
 
     let finished_session = {
         let mut session = state.session.lock().await;
@@ -3311,8 +3385,19 @@ pub async fn start_manual_sync(
                 &format!("Failed to read sync settings: {error}"),
             )
         })?;
-    let session_config = build_sync_session_config(&settings, cfg!(target_os = "android"))
+    let session_config = build_sync_session_config(
+        &settings,
+        cfg!(any(target_os = "android", target_os = "ios")),
+    )
         .map_err(|error| encode_sync_command_error(error.code, &error.detail))?;
+
+    #[cfg(target_os = "ios")]
+    if !crate::vcp_modules::lifecycle_manager::is_app_in_foreground(&handle) {
+        return Err(encode_sync_command_error(
+            "SYNC_BACKGROUND_STOPPED",
+            "应用已切到后台，本次手动同步未启动。",
+        ));
+    }
 
     let (tx, rx) = mpsc::unbounded_channel::<SyncCommand>();
     let session_id = state.next_session_id.fetch_add(1, Ordering::SeqCst) + 1;
@@ -3329,8 +3414,8 @@ pub async fn start_manual_sync(
     let connection_status = state.connection_status.clone();
     let run_cancel_token = cancel_token.clone();
     let join_handle = tokio::spawn(async move {
-        run_sync_session(
-            app_handle,
+        let outcome = run_sync_session(
+            app_handle.clone(),
             session_id,
             session_config,
             run_cancel_token,
@@ -3338,7 +3423,9 @@ pub async fn start_manual_sync(
             rx,
             connection_status,
         )
-        .await
+        .await;
+        finish_sync_session(&app_handle, session_id, &outcome).await;
+        outcome
     });
 
     *state.session.lock().await = Some(SyncSessionHandle {
@@ -3917,8 +4004,8 @@ mod tests {
         }
     }
 
-    fn sync_config_error(settings: &Settings, is_android: bool) -> SyncConfigValidationError {
-        match build_sync_session_config(settings, is_android) {
+    fn sync_config_error(settings: &Settings, is_mobile: bool) -> SyncConfigValidationError {
+        match build_sync_session_config(settings, is_mobile) {
             Ok(_) => panic!("expected invalid sync configuration"),
             Err(error) => error,
         }
@@ -4026,7 +4113,7 @@ mod tests {
     }
 
     #[test]
-    fn android_session_config_rejects_both_endpoint_loopbacks() {
+    fn mobile_session_config_rejects_both_endpoint_loopbacks() {
         for (field, settings) in [
             (
                 "WebSocket localhost",
@@ -4039,6 +4126,13 @@ mod tests {
                 "WebSocket IPv4 loopback range",
                 Settings {
                     sync_server_url: "ws://127.0.0.2:5975".to_string(),
+                    ..valid_sync_settings()
+                },
+            ),
+            (
+                "HTTP absolute localhost name",
+                Settings {
+                    sync_http_url: "http://LOCALHOST.:5974".to_string(),
                     ..valid_sync_settings()
                 },
             ),
@@ -4396,15 +4490,39 @@ mod tests {
             Ok(())
         });
 
-        cancel_and_join_session(SyncSessionHandle {
+        let mut session = SyncSessionHandle {
             session_id: 1,
             cancel_token,
             join_handle,
-        })
-        .await
-        .expect("session should exit cleanly");
+        };
+        cancel_and_join_session(&mut session, Duration::from_secs(1))
+            .await
+            .expect("session exit should be observed")
+            .expect("session should exit cleanly");
 
         assert!(exited.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn stop_wait_budget_keeps_the_session_owned_until_accepted_writes_finish() {
+        let cancel_token = CancellationToken::new();
+        let task_token = cancel_token.clone();
+        let (finish_write, write_finished) = tokio::sync::oneshot::channel();
+        let join_handle = tokio::spawn(async move {
+            task_token.cancelled().await;
+            write_finished.await.map_err(|error| error.to_string())?;
+            Ok(())
+        });
+        let mut session = SyncSessionHandle { session_id: 8, cancel_token, join_handle };
+
+        assert!(cancel_and_join_session(&mut session, Duration::ZERO).await.is_none());
+        assert!(session.cancel_token.is_cancelled());
+        assert!(!session.join_handle.is_finished());
+        finish_write.send(()).expect("the old session must still own its accepted write");
+        cancel_and_join_session(&mut session, Duration::from_secs(1))
+            .await
+            .expect("the retained session must eventually settle")
+            .expect("the completed drain must not be reported as a timeout");
     }
 
     #[tokio::test]

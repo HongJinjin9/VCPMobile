@@ -158,9 +158,12 @@ async fn run_group_speaker_turn(
         ForegroundLease::acquire(app_handle, ForegroundTask::Stream, &agent_name).ok();
 
     // 发射 thinking 事件，让前端为当前接力的 Agent 创建思考占位消息
-    if let Some(chan) = stream_channel {
-        let _ = chan.send(StreamEvent::thinking(message_id.clone(), context.clone()));
-    }
+    crate::vcp_modules::vcp_client::deliver_request_event(
+        app_handle,
+        &request_key,
+        stream_channel.clone(),
+        StreamEvent::thinking(message_id.clone(), context.clone()),
+    );
 
     let res_result = perform_vcp_request_registered(
         app_handle,

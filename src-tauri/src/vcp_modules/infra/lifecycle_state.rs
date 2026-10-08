@@ -123,7 +123,9 @@ impl LifecycleState {
             last_error: Arc::new(RwLock::new(None)),
             database_recovery: Arc::new(RwLock::new(None)),
             local_server_handle: Arc::new(tokio::sync::Mutex::new(None)),
-            is_foreground: Arc::new(AtomicBool::new(true)),
+            // iOS services wait for an actual active observation. An initial
+            // inactive snapshot must not suppress the first active transition.
+            is_foreground: Arc::new(AtomicBool::new(!cfg!(target_os = "ios"))),
             lifecycle_snapshot: RwLock::new(None),
             #[cfg(any(target_os = "android", target_os = "ios"))]
             native_lifecycle_ordering: std::sync::Mutex::new(NativeLifecycleOrdering::default()),

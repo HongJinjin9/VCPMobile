@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::AppHandle;
 
+#[cfg(not(target_os = "ios"))]
 #[derive(Clone)]
 struct CpuSample {
     total: u64,
@@ -34,10 +35,6 @@ impl<T: Default> CacheItem<T> {
         }
     }
 
-    fn get_last(&self) -> Option<&T> {
-        self.last_updated.map(|_| &self.data)
-    }
-
     fn update(&mut self, data: T) {
         self.data = data;
         self.last_updated = Some(Instant::now());
@@ -45,6 +42,11 @@ impl<T: Default> CacheItem<T> {
 }
 
 pub struct TelemetryCenter {
+    /// Serializes explicit and scheduled native samples. Dropping a cancelled
+    /// waiter cannot later commit its native response to these caches.
+    pub(super) sensor_sampling: tokio::sync::Mutex<()>,
+    #[cfg(target_os = "ios")]
+    device_cache: Mutex<CacheItem<Option<std::sync::Arc<tauri_plugin_vcp_mobile::system::DeviceSnapshot>>>>,
     cpu_usage_cache: Mutex<CacheItem<String>>,
     cpu_temp_cache: Mutex<CacheItem<String>>,
     cpu_freq_cache: Mutex<CacheItem<String>>,
@@ -58,12 +60,16 @@ pub struct TelemetryCenter {
     ambient_cache: Mutex<CacheItem<String>>,
 
     // CPU delta calculator state
+    #[cfg(not(target_os = "ios"))]
     cpu_prev_sample: Mutex<Option<CpuSample>>,
 }
 
 impl TelemetryCenter {
     pub fn new() -> Self {
         Self {
+            sensor_sampling: tokio::sync::Mutex::new(()),
+            #[cfg(target_os = "ios")]
+            device_cache: Mutex::new(CacheItem::new(15)),
             cpu_usage_cache: Mutex::new(CacheItem::new(15)),
             cpu_temp_cache: Mutex::new(CacheItem::new(15)),
             cpu_freq_cache: Mutex::new(CacheItem::new(15)),
@@ -76,6 +82,7 @@ impl TelemetryCenter {
             motion_cache: Mutex::new(CacheItem::new(15)),
             ambient_cache: Mutex::new(CacheItem::new(30)),
 
+            #[cfg(not(target_os = "ios"))]
             cpu_prev_sample: Mutex::new(None),
         }
     }
@@ -164,22 +171,22 @@ impl TelemetryCenter {
         fresh
     }
 
-    pub fn get_memory_info(&self) -> String {
+    pub fn get_memory_info(&self, app: &AppHandle) -> String {
         let mut guard = self.memory_cache.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(val) = guard.get_valid() {
             return val.clone();
         }
-        let fresh = self.capture_memory_info();
+        let fresh = self.capture_memory_info(app);
         guard.update(fresh.clone());
         fresh
     }
 
-    pub fn get_storage_info(&self) -> String {
+    pub fn get_storage_info(&self, app: &AppHandle) -> String {
         let mut guard = self.storage_cache.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(val) = guard.get_valid() {
             return val.clone();
         }
-        let fresh = self.capture_storage_info();
+        let fresh = self.capture_storage_info(app);
         guard.update(fresh.clone());
         fresh
     }
@@ -202,10 +209,7 @@ impl TelemetryCenter {
         if let Some(val) = guard.get_valid() {
             return val.clone();
         }
-        guard
-            .get_last()
-            .cloned()
-            .unwrap_or_else(|| "位置信息: 尚未按需采样".to_string())
+        "位置信息: 尚无有效的本次采样".to_string()
     }
 
     pub fn get_motion_info(&self, _app: &AppHandle) -> String {
@@ -213,10 +217,7 @@ impl TelemetryCenter {
         if let Some(val) = guard.get_valid() {
             return val.clone();
         }
-        guard
-            .get_last()
-            .cloned()
-            .unwrap_or_else(|| "运动状态: 尚未按需采样".to_string())
+        "运动状态: 尚无有效的本次采样".to_string()
     }
 
     pub fn get_ambient_info(&self, _app: &AppHandle) -> String {
@@ -224,16 +225,14 @@ impl TelemetryCenter {
         if let Some(val) = guard.get_valid() {
             return val.clone();
         }
-        guard
-            .get_last()
-            .cloned()
-            .unwrap_or_else(|| "环境传感器: 尚未按需采样".to_string())
+        "环境传感器: 尚无有效的本次采样".to_string()
     }
 
     // =================================================================
     // Private JNI/IO Hardware Samplers
     // =================================================================
 
+    #[cfg(not(target_os = "ios"))]
     fn capture_cpu_usage(&self, app: &AppHandle) -> String {
         let content = match crate::distributed::tools::sysfs_utils::execute_root_command_safe(
             app,
@@ -287,6 +286,7 @@ impl TelemetryCenter {
         }
     }
 
+    #[cfg(not(target_os = "ios"))]
     fn capture_cpu_temp(&self, app: &AppHandle) -> String {
         if let Some(raw_temp) = crate::distributed::tools::sysfs_utils::execute_root_command_safe(
             app,
@@ -311,6 +311,7 @@ impl TelemetryCenter {
         }
     }
 
+    #[cfg(not(target_os = "ios"))]
     fn capture_cpu_freq(&self) -> String {
         let cpu_base = "/sys/devices/system/cpu";
         let mut freqs_khz: Vec<u64> = Vec::new();
@@ -339,6 +340,7 @@ impl TelemetryCenter {
         }
     }
 
+    #[cfg(not(target_os = "ios"))]
     fn capture_gpu_info(&self, app: &AppHandle) -> String {
         let mut gpu_loaded = false;
         let mut gpu_load_str = "受系统安全限制".to_string();
@@ -388,7 +390,7 @@ impl TelemetryCenter {
     }
 
     fn capture_battery_info(&self, app: &AppHandle) -> String {
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         {
             let result: Result<String, String> = (|| {
                 let status = tauri_plugin_vcp_mobile::system::get_battery_status(app.clone())?;
@@ -402,22 +404,27 @@ impl TelemetryCenter {
                 } else {
                     ""
                 };
-                Ok(format!(
-                    "电量: {}%{} | 状态: {} | 温度: {}",
-                    status.level, pwr_save, status_str, temp_str
-                ))
+                let mut result = format!(
+                    "电量: {}{} | 状态: {} | 温度: {}",
+                    status.level.map(|level| format!("{level}%")).unwrap_or_else(|| "未知".to_string()), pwr_save, status_str, temp_str
+                );
+                for (field, reason) in status.unavailable {
+                    result.push_str(&format!(" | {field}: {reason}"));
+                }
+                Ok(result)
             })();
 
             result.unwrap_or_else(|e| format!("电量: N/A | 错误: {}", e))
         }
-        #[cfg(not(target_os = "android"))]
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
             let _ = app;
             "电池信息不可用".to_string()
         }
     }
 
-    fn capture_memory_info(&self) -> String {
+    #[cfg(not(target_os = "ios"))]
+    fn capture_memory_info(&self, _app: &AppHandle) -> String {
         let content = crate::distributed::tools::sysfs_utils::read_sysfs("/proc/meminfo");
         if content.is_empty() {
             return "内存信息不可用".to_string();
@@ -472,7 +479,8 @@ impl TelemetryCenter {
         result
     }
 
-    fn capture_storage_info(&self) -> String {
+    #[cfg(not(target_os = "ios"))]
+    fn capture_storage_info(&self, _app: &AppHandle) -> String {
         #[cfg(unix)]
         unsafe {
             let path = std::ffi::CString::new("/data")
@@ -508,7 +516,7 @@ impl TelemetryCenter {
     }
 
     fn capture_network_info(&self, app: &AppHandle) -> String {
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         {
             let result: Result<String, String> = (|| {
                 let status = tauri_plugin_vcp_mobile::system::get_network_status(app.clone())?;
@@ -516,7 +524,8 @@ impl TelemetryCenter {
                     return Ok("网络: 未连接".to_string());
                 }
 
-                let format_speed = |kbps: i32| -> String {
+                let format_speed = |kbps: Option<i32>| -> String {
+                    let Some(kbps) = kbps else { return "系统未提供".to_string(); };
                     if kbps >= 1000 {
                         format!("{:.1}Mbps", kbps as f64 / 1000.0)
                     } else {
@@ -526,15 +535,28 @@ impl TelemetryCenter {
                 let down_str = format_speed(status.down_speed_kbps);
                 let up_str = format_speed(status.up_speed_kbps);
 
-                Ok(format!(
+                let mut result = format!(
                     "类型: {} | IP: {} | 下行: {} | 上行: {}",
-                    status.r#type, status.ip, down_str, up_str
-                ))
+                    status.r#type, status.ip.unwrap_or_else(|| "系统未提供".to_string()), down_str, up_str
+                );
+                if cfg!(target_os = "ios") {
+                    result.push_str(" | 网络路径可用不代表服务器可达");
+                }
+                if let Some(expensive) = status.is_expensive {
+                    result.push_str(if expensive { " | 系统判定高成本路径:是" } else { " | 系统判定高成本路径:否" });
+                }
+                if let Some(constrained) = status.is_constrained {
+                    result.push_str(if constrained { " | 低数据模式:是" } else { " | 低数据模式:否" });
+                }
+                for (field, reason) in status.unavailable {
+                    result.push_str(&format!(" | {field}: {reason}"));
+                }
+                Ok(result)
             })();
 
             result.unwrap_or_else(|e| format!("网络: 错误 ({})", e))
         }
-        #[cfg(not(target_os = "android"))]
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
             let _ = app;
             "网络: 未连接".to_string()
@@ -545,7 +567,79 @@ impl TelemetryCenter {
     // Device Summary Telemetries Helper Formatter
     // =================================================================
 
-    pub fn get_memory_brief(&self) -> String {
+    #[cfg(target_os = "ios")]
+    fn device_snapshot(&self, app: &AppHandle) -> Result<std::sync::Arc<tauri_plugin_vcp_mobile::system::DeviceSnapshot>, String> {
+        let mut cache = self.device_cache.lock().unwrap_or_else(|error| error.into_inner());
+        if let Some(Some(snapshot)) = cache.get_valid() {
+            return Ok(snapshot.clone());
+        }
+        let snapshot = std::sync::Arc::new(tauri_plugin_vcp_mobile::system::get_device_snapshot(app.clone())?);
+        cache.update(Some(snapshot.clone()));
+        Ok(snapshot)
+    }
+
+    #[cfg(target_os = "ios")]
+    fn capture_cpu_usage(&self, app: &AppHandle) -> String {
+        match self.device_snapshot(app) {
+            Ok(snapshot) => {
+                let usage = snapshot.cpu_usage_percent.map(|value| format!("{value:.1}%"))
+                    .unwrap_or_else(|| snapshot.unavailable.get("cpuUsagePercent").cloned().unwrap_or_else(|| "等待下次采样".to_string()));
+                format!("{usage} | 逻辑核心:{}/{}", snapshot.active_processor_count, snapshot.processor_count)
+            }
+            Err(error) => format!("不可用 ({error})"),
+        }
+    }
+
+    #[cfg(target_os = "ios")]
+    fn capture_cpu_temp(&self, app: &AppHandle) -> String {
+        tauri_plugin_vcp_mobile::system::get_cpu_thermal_status(app.clone())
+            .map(|state| format!("{state}（系统热压力等级；未提供摄氏温度）"))
+            .unwrap_or_else(|error| format!("不可用 ({error})"))
+    }
+
+    #[cfg(target_os = "ios")]
+    fn capture_cpu_freq(&self) -> String {
+        "iOS 未提供实时 CPU 频率".to_string()
+    }
+
+    #[cfg(target_os = "ios")]
+    fn capture_gpu_info(&self, app: &AppHandle) -> String {
+        tauri_plugin_vcp_mobile::system::get_gpu_status(app.clone())
+            .map(|gpu| format!("型号: {} | iOS 未提供实时 GPU 负载、频率和显存占用", gpu.renderer))
+            .unwrap_or_else(|error| format!("GPU 不可用 ({error})"))
+    }
+
+    #[cfg(target_os = "ios")]
+    fn capture_memory_info(&self, app: &AppHandle) -> String {
+        match self.device_snapshot(app) {
+            Ok(snapshot) => {
+                let resident = snapshot.process_resident_memory_bytes
+                    .map(crate::distributed::tools::sysfs_utils::format_bytes)
+                    .unwrap_or_else(|| snapshot.unavailable.get("processResidentMemoryBytes").cloned().unwrap_or_else(|| "不可用".to_string()));
+                format!("物理总内存:{} | 当前 App 驻留:{} | 当前 App 可用预算:{} | 全机可用内存/Swap:系统未提供",
+                    crate::distributed::tools::sysfs_utils::format_bytes(snapshot.physical_memory_bytes), resident,
+                    crate::distributed::tools::sysfs_utils::format_bytes(snapshot.process_available_memory_bytes))
+            }
+            Err(error) => format!("内存不可用 ({error})"),
+        }
+    }
+
+    #[cfg(target_os = "ios")]
+    fn capture_storage_info(&self, app: &AppHandle) -> String {
+        tauri_plugin_vcp_mobile::system::get_free_disk_space(app.clone())
+            .map(|disk| format!("应用所在卷:总量 {} | 可用 {}（卷空间，非 App 占用）",
+                crate::distributed::tools::sysfs_utils::format_bytes(disk.total_bytes),
+                crate::distributed::tools::sysfs_utils::format_bytes(disk.free_bytes)))
+            .unwrap_or_else(|error| format!("存储不可用 ({error})"))
+    }
+
+    #[cfg(target_os = "ios")]
+    pub fn get_memory_brief(&self, app: &AppHandle) -> String {
+        self.get_memory_info(app)
+    }
+
+    #[cfg(not(target_os = "ios"))]
+    pub fn get_memory_brief(&self, _app: &AppHandle) -> String {
         let content = crate::distributed::tools::sysfs_utils::read_sysfs("/proc/meminfo");
         if content.is_empty() {
             return "内存:N/A".to_string();
@@ -576,7 +670,7 @@ impl TelemetryCenter {
     }
 
     pub fn get_battery_brief(&self, app: &AppHandle) -> String {
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         {
             let result: Result<String, String> = (|| {
                 let status = tauri_plugin_vcp_mobile::system::get_battery_status(app.clone())?;
@@ -585,11 +679,11 @@ impl TelemetryCenter {
                     Some("已充满") => "已满",
                     _ => "",
                 };
-                Ok(format!("电量:{}%{}", status.level, suffix))
+                Ok(format!("电量:{}{}", status.level.map(|level| format!("{level}%")).unwrap_or_else(|| "未知".to_string()), suffix))
             })();
             result.unwrap_or_else(|_| "电量:N/A".to_string())
         }
-        #[cfg(not(target_os = "android"))]
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
             let _ = app;
             let cap = crate::distributed::tools::sysfs_utils::read_sysfs(
@@ -615,7 +709,7 @@ impl TelemetryCenter {
     }
 
     pub fn get_network_brief(&self, app: &AppHandle) -> String {
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         {
             let result: Result<String, String> = (|| {
                 let status = tauri_plugin_vcp_mobile::system::get_network_status(app.clone())?;
@@ -625,9 +719,9 @@ impl TelemetryCenter {
                     Ok("离线".to_string())
                 }
             })();
-            result.unwrap_or_else(|_| "离线".to_string())
+            result.unwrap_or_else(|error| format!("不可用 ({error})"))
         }
-        #[cfg(not(target_os = "android"))]
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
             let _ = app;
             let route = crate::distributed::tools::sysfs_utils::read_sysfs("/proc/net/route");
@@ -656,7 +750,7 @@ impl TelemetryCenter {
                 return c.to_string();
             }
         }
-        "坐标: N/A".to_string()
+        loc
     }
 
     pub fn get_motion_brief(&self, app: &AppHandle) -> String {
@@ -669,6 +763,6 @@ impl TelemetryCenter {
                 return m.to_string();
             }
         }
-        "静止".to_string()
+        motion
     }
 }

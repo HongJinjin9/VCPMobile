@@ -8,7 +8,7 @@ Phase 2 native 接入、Phase 3 attempt/terminal/settle 契约；与 Phase 4 可
 
 ## 既定范围
 
-SSE 后台连续性的具体方案、iOS 26 continued-task availability/request/handler/expiration/completion、真实进度、前台常亮与资源释放；其他连接和维护工作的尽力后台策略；单次终态。
+SSE 后台连续性的具体方案、最低 iOS/iPadOS 26.0 下的 continued-task request/handler/expiration/completion、真实进度、前台常亮与资源释放；其他连接和维护工作的尽力后台策略；单次终态。高于 26.0 的新 API 仍按声明核对 availability。
 
 产品输入沿用 [D1–D19](../09-Magi综合裁决与待决策清单.md)，依赖顺序见 [总路线](../08-分期实施路线图与验收门禁.md)。本入口是工作区索引，不表示本阶段已实施。
 
@@ -16,9 +16,9 @@ SSE 后台连续性的具体方案、iOS 26 continued-task availability/request/
 
 | 任务 | 入口与实施内容 | 依赖与完成条件 |
 |---|---|---|
-| P5-1 SSE 方案对比 | 从现有 Rust SSE/请求 owner 出发，核对 continued task、音频会话与用户提出的循环空音频等候选机制的真实 API、执行条件和系统中断路径 | minimum 15.0 与各 API availability 分层；记录能保障的具体条件及不能覆盖的情况。空音频是用户明确提出的候选手段，尚非已证实可行或已选定的生产实现；若无法达到严格目标，明确缺口并交用户决定，不擅自降为“仅前台” |
+| P5-1 SSE 方案对比 | 从现有 Rust SSE/请求 owner 出发，核对 continued task、音频会话与用户提出的循环空音频等候选机制的真实 API、执行条件和系统中断路径 | minimum 26.0 已由用户确定，但版本满足不等于真实获得后台执行资源；记录能保障的具体条件及不能覆盖的情况。空音频是用户明确提出的候选手段，尚非已证实可行或已选定的生产实现；若无法达到严格目标，明确缺口并交用户决定，不擅自降为“仅前台” |
 | P5-2 attempt 与终态 | 同一 attempt/task/generation 绑定、取消原因、settle receipt、真实字节/字符/可选 token 与持久化提交 | 依赖 Phase 3 业务收尾；完成、取消、系统结束、网络错误共享单次终态，不用后台层新发请求或伪造进度 |
-| P5-3 continued adapter | request、handler、activate、progress、expiration、completion 和迟到回调 | 处理不可用版本、请求拒绝、系统停止与任务已结束后的迟到 handler；资源真实获取才视为成功，Bundle ID/task 前缀可被 Phase 6 一起改写 |
+| P5-3 continued adapter | request、handler、activate、progress、expiration、completion 和迟到回调 | 处理资源不可用、请求拒绝、系统停止与任务已结束后的迟到 handler；高于 26.0 的 API 保留相应 availability。资源真实获取才视为成功，Bundle ID/task 前缀可被 Phase 6 一起改写 |
 | P5-4 常亮及其他后台工作 | 原生前台常亮复用任务 owner；Log/Sync/Distributed/维护按真实用途选择尽力继续或有界关闭 | 常亮在结束、取消、离开所需场景后释放；不冒充后台执行。其余后台工作不能无条件继承 SSE 保活资源或复制 Android linger/service 规则 |
 
 如采用音频相关方案，需同时交代会话抢占、系统中断、路由变化、资源结束与用户可感知行为；不以“没有可听声音”推断执行权永久存在。系统声明与资源加入的依据来自最终选定方案，不能先堆叠后台模式。

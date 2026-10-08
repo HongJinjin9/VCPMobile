@@ -1,12 +1,12 @@
 # AGENTS.md — VCP Mobile 移动端原生插件
 
-> 本文件适用于 `src-tauri/plugins/vcp-mobile/**`。它继承仓库根规则，只补充移动端原生能力边界内的代码结构、通信路径与修改闭环；以下代码地图包含 Android 实现与 Phase 2 iOS 接入。
+> 本文件适用于 `src-tauri/plugins/vcp-mobile/**`。它继承仓库根规则，只补充移动端原生能力边界内的代码结构、通信路径与修改闭环。
 
 ---
 
 ## 1. 子系统定位
 
-`tauri-plugin-vcp-mobile` 实现 VCP Mobile 的 Android 原生能力，并接入 iOS Swift 生命周期/网络 Channel。它接收 Vue 或 Rust 核心发出的设备意图，经 Rust 插件边界进入对应原生 owner，再把调用结果或原生事件送回实际消费者。iOS 其他 adapter 继续分期实施，需与 host 开发分支显式区分；非 Android fallback 不代表 iOS 可用，也不建立桌面产品能力。
+`tauri-plugin-vcp-mobile` 实现 VCP Mobile 的 Android 原生能力，并接入 iOS Swift 生命周期、通知、设备和传感器。它接收 Vue 或 Rust 核心发出的设备意图，经 Rust 插件边界进入对应原生 owner，再把调用结果或原生事件送回实际消费者。iOS 文件媒体、分享与后台 adapter 继续分期实施，需与 host 开发分支显式区分；非 Android fallback 不代表 iOS 可用，也不建立桌面产品能力。
 
 Android、iOS、host 的插件分支显式隔离。尚未接通的原生调用如有实际消费者，应返回符合当前原因的不可用结果；不为形式完整增设占位接口。固定状态与无副作用成功仅用于排除 Android/iOS 的 host 开发 fixture，不能借作 iOS 实现。
 
@@ -28,8 +28,11 @@ Rust 核心内部调用 ─> Rust 公开入口 ─┼─> PluginHandle / JNI
 | ---- | ---- |
 | `src/lib.rs` | 组合插件、注册前端可调用命令、注入 `VcpMobileState` |
 | `src/events.rs` | Rust 原生 Channel 订阅、生命周期/网络事件类型、后台服务失败通知与快照收集；真实 Events 注册失败保留至进程结束，Guardian/Helper 取走 |
-| `src/ios.rs` | 内部 Swift 事件注册、协议校验与 receiver 保活；等待最终 ack，调用方取消不丢原生接收端 |
+| `src/ios.rs` | Swift 调用与事件注册；原生 receiver 持有至最终结果。授权等长等待和工具查询由调用者移入 blocking worker，事件订阅使用独立异步接收任务 |
 | `ios/Package.swift`、`ios/Sources/VcpMobilePlugin.swift` | Swift product/初始化符号、主队列 app/Scene 观察与 NWPathMonitor；不拥有业务状态 |
+| `ios/Sources/NativeNotifications.swift`、`NativeNotificationSceneBridge.swift` | 真实通知授权、发送、前台展示和点击快照；在插件初始化时接入锁定 Tao Scene 入口并完整转发原窗口实现 |
+| `ios/Sources/NativeDevice.swift`、`NativeSensors.swift` | 设备/电量/空间/网络快照、单 owner 有界传感器采样；缺失字段保留原因，退后台停止采样 |
+| `ios/Sources/NativeClipboard.swift` | 前台系统剪贴板读写，UIKit 操作在主队列执行 |
 | `src/screen.rs` | 经 WebView JNI 进入 `ScreenKeepOnArbiter` |
 | `src/stream.rs` | 请求独立的前台保活租约与 helper service 的 Rust 边界 |
 | `src/system.rs` | 承接权限、文件、设备状态、更新与系统能力调用 |
@@ -68,6 +71,8 @@ Rust 核心可以直接调用 `screen`、`stream`、`system` 或 `cli` 暴露的
 Rust 边界变化在 `src-tauri/` 运行 `cargo check --locked -p tauri-plugin-vcp-mobile`；涉及前端类型或跨层调用时从仓库根运行 `pnpm check`。Kotlin、Manifest 或 Service 变化还需编译实际 Android 插件目标。测试只能作为额外执行结果，不能定义生产代码应有行为。
 
 Swift 接入时同步核对 `ios_path`、SwiftPM product、初始化 binding、selector、DTO、Channel 与资源归属；UI 操作显式在主队列执行，领域状态仍归 Rust。Apple 编译/链接按根规范集中在手动 Actions G1/G2，日常源码审计记录具体目标分支与待办。
+
+`NativeNotificationSceneBridge` 依赖锁定 Tao 的 `TaoSceneDelegate` 与 `scene:willConnectToSession:options:`。升级框架时核对类注册先于插件初始化、Objective-C ABI 和原 IMP 转发；不能把 hook 移到 WebView load 或 READY 后，那里会遗漏冷启动参数。通知 pending 是最近一次点击快照，读取不表示 WebView 已接收，Vue 按原生 sequence 去重。
 
 当前 iOS 只在 Rust bootstrap 安装一次长期 Channel；Swift WebView 替换复用同一 Channel 并更换观察者 generation。锁定 Tauri 的原生 Channel 注册表没有删除入口，不能通过反复创建 Channel 实现重试。事件注册最多一个在途，由 READY 后的独立订阅任务等待最终 ack，迟到 reject、解析或协议错误仍报告真实失败，不阻塞核心启动。
 

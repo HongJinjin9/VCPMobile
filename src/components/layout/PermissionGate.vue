@@ -2,7 +2,8 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { useAppLifecycleStore } from '../../core/stores/appLifecycle';
-import { isAndroid } from '../../core/utils/platform';
+import { isAndroid, isIOS } from '../../core/utils/platform';
+import { useSystemNotificationPermission } from '../../features/notification/composables/useSystemNotificationPermission';
 import type {
   DiskSpaceDto,
   ListenerPermissionDto,
@@ -10,9 +11,9 @@ import type {
 } from '../../core/types/native';
 
 const lifecycleStore = useAppLifecycleStore();
+const notificationPermission = useSystemNotificationPermission();
 
 // Only list permissions backed by the current platform's native requests.
-// iOS has no startup permission items yet; it continues through the same owner.
 const permissionItems: ReadonlyArray<{
   id: 'notification' | 'battery';
   name: string;
@@ -21,6 +22,8 @@ const permissionItems: ReadonlyArray<{
 }> = isAndroid ? [
   { id: 'notification', name: '系统通知', desc: '显示 Agent 运行状态和即时提醒', icon: 'i-heroicons-bell' },
   { id: 'battery', name: '后台运行权限', desc: '切换到后台时保持连接不被系统中断', icon: 'i-heroicons-arrow-path' },
+] : isIOS ? [
+  { id: 'notification', name: '系统通知（可选）', desc: '接收本 App 的任务提醒；不启用也能聊天。', icon: 'i-heroicons-bell' },
 ] : [];
 
 const status = ref<PermissionStatusDto>({
@@ -49,6 +52,21 @@ const totalDiskSpaceGB = ref(0);
 const isDiskCheckError = ref(false);
 
 const allGranted = computed(() => permissionItems.every(item => status.value[item.id]));
+const isGranted = (id: 'notification' | 'battery') =>
+  isIOS ? notificationPermission.allowed.value : status.value[id];
+const continuing = ref(false);
+const continueToApp = async () => {
+  if (continuing.value) return;
+  continuing.value = true;
+  try {
+    await lifecycleStore.continueFromPermissionGuide();
+  } catch (cause) {
+    // The startup owner records ERROR and displays the existing retry screen.
+    console.error('[PermissionGate] Failed to continue startup:', cause);
+  } finally {
+    continuing.value = false;
+  }
+};
 
 // 后台省电是否配置好 (优先自动感应电池优化白名单和无后台限制状态)
 const isPowerReady = computed(() => {
@@ -96,6 +114,10 @@ const checkDiskSpace = async () => {
 };
 
 const request = async (type: 'notification' | 'battery') => {
+  if (isIOS) {
+    await notificationPermission.act();
+    return;
+  }
   try {
     await invoke('plugin:vcp-mobile|request_android_permission', { pType: type });
   } catch (e) {
@@ -152,6 +174,7 @@ onMounted(() => {
     });
     return;
   }
+  if (isIOS) return; // Its actual notification observer owns refresh and cleanup.
   check();
   // 当应用从后台切回前台时重检（用户在设置页操作后返回）
   window.addEventListener('visibilitychange', onVisibilityChange);
@@ -225,7 +248,8 @@ onUnmounted(() => {
           <div class="w-full h-full flex-shrink-0 flex flex-col px-5 overflow-y-auto">
             <h3 class="text-lg font-semibold text-gray-900 mb-2 px-1 w-full">授予权限</h3>
             <p class="text-sm text-[#8B7D6B] leading-relaxed mb-4 px-1">
-              VCP Mobile 需要以下权限才能稳定运行<br>VCP Mobile Core
+              <template v-if="isIOS">选择是否接收系统通知。此设置可稍后在通知中心修改。</template>
+              <template v-else>VCP Mobile 需要以下权限才能稳定运行<br>VCP Mobile Core</template>
             </p>
             <div class="w-full space-y-3 mb-4">
               <!-- Permission Cards -->
@@ -233,29 +257,34 @@ onUnmounted(() => {
                 class="group flex items-center gap-4 px-4 py-3 rounded-2xl bg-gray-100/50 active:bg-gray-200/60 transition-all"
               >
                 <div class="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center shrink-0">
-                  <div :class="[item.icon, status[item.id] ? 'text-green-500' : 'text-blue-500']" class="text-xl transition-colors duration-500"></div>
+                  <div :class="[item.icon, isGranted(item.id) ? 'text-green-500' : 'text-blue-500']" class="text-xl transition-colors duration-500"></div>
                 </div>
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2">
                     <span class="font-semibold text-gray-900">{{ item.name }}</span>
                     <Transition name="fade">
-                      <span v-if="status[item.id]" class="text-[9px] px-1.5 py-0.5 bg-green-500/10 text-green-600 rounded-md font-black uppercase tracking-wider">OK</span>
+                      <span v-if="isGranted(item.id)" class="text-[9px] px-1.5 py-0.5 bg-green-500/10 text-green-600 rounded-md font-black uppercase tracking-wider">OK</span>
                     </Transition>
                   </div>
-                  <p class="text-xs text-gray-500 opacity-70 leading-relaxed">{{ item.desc }}</p>
+                  <p class="text-xs text-gray-500 opacity-70 leading-relaxed">{{ isIOS ? notificationPermission.description.value : item.desc }}</p>
                 </div>
-                <button v-if="!status[item.id]"
+                <button v-if="isIOS || !status[item.id]"
                   @click="request(item.id)"
+                  :disabled="isIOS && (notificationPermission.busy.value || notificationPermission.openingSettings.value)"
                   class="px-3 py-1.5 bg-gray-900 text-white text-[13px] font-bold rounded-lg active:scale-95 transition-all shrink-0"
                 >
-                  去授权
+                  {{ isIOS ? notificationPermission.actionLabel.value : '去授权' }}
                 </button>
               </div>
             </div>
 
             <!-- Bottom Action -->
             <div class="mt-auto w-full flex flex-col items-center gap-2 pb-[calc(var(--vcp-safe-bottom,48px)+24px)]">
-              <button v-if="allGranted && currentStep === 1"
+              <button v-if="isIOS" @click="continueToApp" :disabled="continuing"
+                class="w-full py-4 bg-gray-900 text-white text-[15px] font-bold rounded-2xl disabled:opacity-50">
+                {{ continuing ? '正在进入…' : notificationPermission.allowed.value ? '继续进入应用' : '暂不启用，继续进入应用' }}
+              </button>
+              <button v-else-if="allGranted && currentStep === 1"
                 @click="goNext"
                 class="w-full py-4 bg-gray-900 text-white text-[15px] font-bold rounded-2xl active:scale-95 transition-all shadow-lg shadow-gray-900/10 flex items-center justify-center gap-2"
               >

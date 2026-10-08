@@ -13,7 +13,7 @@ impl StreamingTool for LocationTool {
     fn manifest(&self) -> ToolManifest {
         ToolManifest {
             name: "MobileLocation".to_string(),
-            description: "获取当前的经纬度高精度坐标、移动速度、海拔高度及定位源精度。".to_string(),
+            description: "按实际授权读取可得的坐标、定位精度、速度与海拔；结果可能为系统提供的大致位置，缺失字段明确说明。".to_string(),
             display_name: "GPS 地理定位".to_string(),
             placeholder: Some("{{MobileLocation}}".to_string()),
             invocation_commands: vec![],

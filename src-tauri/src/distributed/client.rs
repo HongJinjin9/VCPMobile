@@ -80,6 +80,13 @@ impl SessionTaskTracker {
         if self.closed.load(Ordering::SeqCst) {
             return;
         }
+        // Finished tool requests must not accumulate for the lifetime of a
+        // persistent socket. Joining here also observes task panics.
+        while let Some(result) = tasks.try_join_next() {
+            if let Err(error) = result {
+                log::warn!("[Distributed] Session child task failed: {error}");
+            }
+        }
         tasks.spawn(async move {
             tokio::select! {
                 biased;
@@ -389,7 +396,20 @@ impl DistributedClient {
         registry: Arc<ToolRegistry>,
     ) -> Result<(), String> {
         let _lifecycle_guard = self.lifecycle.lock().await;
-        let remote_identity = stable_remote_identity(&ws_url, &device_name)?;
+        let validated = if vcp_key.trim().is_empty() {
+            Err("distributed authentication key must not be empty".to_string())
+        } else {
+            normalize_remote_ws_url(&ws_url)
+                .and_then(|url| stable_remote_identity(&url, &device_name).map(|identity| (url, identity)))
+        };
+        let (ws_url, remote_identity) = match validated {
+            Ok(config) => config,
+            Err(error) => {
+                self.status.write().await.last_error = Some(error.clone());
+                Self::emit_status(&app, &self.status).await;
+                return Err(error);
+            }
+        };
 
         // Prevent duplicate activation using ConnectionState.
         let next_session_id = {
@@ -610,6 +630,7 @@ impl DistributedClient {
                         &status,
                         &registry,
                         &mut reconfigure_rx,
+                        &mut reconnect_rx,
                         session_id,
                     )
                     .await;
@@ -711,11 +732,19 @@ impl DistributedClient {
         status: &Arc<RwLock<DistributedStatus>>,
         registry: &Arc<ToolRegistry>,
         reconfigure_rx: &mut tokio::sync::mpsc::Receiver<()>,
+        reconnect_rx: &mut tokio::sync::mpsc::Receiver<()>,
         session_id: u64,
     ) -> SessionExit {
         use tokio_tungstenite::tungstenite::Message;
 
-        let tool_plan = Arc::new(registry.build_session_plan(app).await);
+        let tool_plan = tokio::select! {
+            biased;
+            _ = cancel_token.cancelled() => return SessionExit {
+                reason: "Client requested shutdown before tool registration".to_string(),
+                reconnect_immediately: false,
+            },
+            plan = registry.build_session_plan(app) => Arc::new(plan),
+        };
         let session_cancel = cancel_token.child_token();
         let child_tracker = Arc::new(SessionTaskTracker::new(session_cancel.clone()));
         let (mut ws_sink, mut ws_rx) = ws_stream.split();
@@ -812,6 +841,12 @@ impl DistributedClient {
                 Some(()) = reconfigure_rx.recv() => {
                     log::info!("[Distributed] Tool authorization changed; replacing connection session.");
                     exit_reason = "Tool authorization changed".to_string();
+                    reconnect_immediately = true;
+                    break;
+                }
+
+                Some(()) = reconnect_rx.recv() => {
+                    exit_reason = "Network recovery requested reconnection".to_string();
                     reconnect_immediately = true;
                     break;
                 }
@@ -932,9 +967,10 @@ impl DistributedClient {
                 // Report IP — mirrors reportIPAddress()
                 let device_name_clone = device_name.to_string();
                 let ws_tx_clone = ws_tx.clone();
+                let report_app = app.clone();
                 child_tracker
                     .spawn(async move {
-                        Self::report_ip(&device_name_clone, &ws_tx_clone).await;
+                        Self::report_ip(&report_app, &device_name_clone, &ws_tx_clone).await;
                     })
                     .await;
 
@@ -1155,9 +1191,28 @@ impl DistributedClient {
 
     /// Report IP addresses to the main server.
     /// VCPChat ref: reportIPAddress() line 310-347
-    async fn report_ip(device_name: &str, ws_tx: &WsSender) {
-        // Collect local IPv4 addresses (simplified — no external crate needed)
-        let local_ips = Vec::new(); // TODO: enumerate network interfaces in Phase 2
+    async fn report_ip(_app: &AppHandle, device_name: &str, ws_tx: &WsSender) {
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        let local_ips = {
+            let app = _app.clone();
+            match tauri::async_runtime::spawn_blocking(move || {
+                tauri_plugin_vcp_mobile::system::get_network_status(app)
+            }).await {
+                Ok(Ok(network)) => network.ip.into_iter()
+                    .flat_map(|addresses| addresses.split(',').map(str::trim).filter(|address| !address.is_empty()).map(str::to_owned).collect::<Vec<_>>())
+                    .collect(),
+                Ok(Err(error)) => {
+                    log::warn!("[Distributed] Local IP unavailable: {error}");
+                    Vec::new()
+                }
+                Err(error) => {
+                    log::warn!("[Distributed] Local IP task failed: {error}");
+                    Vec::new()
+                }
+            }
+        };
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        let local_ips = Vec::new();
 
         // Optional: fetch public IP with a 5-second timeout
         let public_ip: Option<String> = {

@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useDataReload } from "../composables/useDataReload";
 import { useNotificationStore } from "./notification";
-import { isAndroid } from "../utils/platform";
+import { isAndroid, isIOS } from "../utils/platform";
 import type { BatteryStatusDto } from "../types/native";
 
 type SyncStatus =
@@ -381,6 +381,8 @@ export const useSyncSessionStore = defineStore("syncSession", () => {
   // --- 监听器引用 ---
   let unlistenFns: UnlistenFn[] = [];
   let listenerSetup: Promise<void> | null = null;
+  let settlement: Promise<void> | null = null;
+  let shutdownPending = false;
   let viewGeneration = 0;
   let startAttempt = 0;
   let awaitingSessionId = false;
@@ -413,7 +415,6 @@ export const useSyncSessionStore = defineStore("syncSession", () => {
     terminalError.value = null;
     desktopInfo.value = null;
     retryInFlight.value = false;
-    needsReload.value = false;
     awaitingSessionId = false;
     bufferedSessionEvents = [];
     lastLoggedPhase = "";
@@ -439,6 +440,37 @@ export const useSyncSessionStore = defineStore("syncSession", () => {
     setTerminalError(localTerminalError(code, detail));
   };
 
+  const stopAndReload = (): Promise<void> => {
+    if (settlement) return settlement;
+    shutdownPending = true;
+    const work = (async () => {
+      await invoke("stop_sync");
+      shutdownPending = false;
+      // STOP_PENDING is a rejection above: accepted writes are still draining.
+      // Keep this flag across close/reopen until a real stop receipt is available.
+      if (needsReload.value) {
+        try {
+          await useDataReload().performFullReload();
+          needsReload.value = false;
+        } catch (error) {
+          console.error("[SyncSession] Failed to reload synchronized data:", error);
+          useNotificationStore().addNotification({
+            id: "sync_data_reload_failed",
+            type: "error",
+            title: "同步数据刷新失败",
+            message: "界面未能重新加载同步后的数据。请重新打开同步面板重试。",
+            toastOnly: false,
+          });
+        }
+      }
+    })();
+    const completion: Promise<void> = work.finally(() => {
+      if (settlement === completion) settlement = null;
+    });
+    settlement = completion;
+    return completion;
+  };
+
   const beginSync = async (preserveLogs: boolean) => {
     if (status.value !== "idle") return;
     const generation = viewGeneration;
@@ -458,6 +490,20 @@ export const useSyncSessionStore = defineStore("syncSession", () => {
     status.value = "connecting";
     canDismiss.value = false;
 
+    if (settlement || shutdownPending || needsReload.value) {
+      try {
+        await stopAndReload();
+      } catch (error) {
+        if (isCurrentAttempt(generation, attempt)) {
+          const terminal = parseCommandError(error, "STOP_SYNC_FAILED");
+          pushLog("error", terminal.message);
+          setTerminalError(terminal);
+        }
+        return;
+      }
+      if (!isCurrentAttempt(generation, attempt)) return;
+    }
+
     try {
       await listenerSetup;
     } catch (error: unknown) {
@@ -471,16 +517,15 @@ export const useSyncSessionStore = defineStore("syncSession", () => {
     }
     if (!isCurrentAttempt(generation, attempt)) return;
 
-    // 当前电量 adapter 仅 Android 接通；其他平台沿用无法确认后继续的策略。
-    if (isAndroid) {
+    // Native observations may omit the battery level, for example on an iPad
+    // without an available reading. Unknown is not a successful high-battery check.
+    if (isAndroid || isIOS) {
       try {
         const battery = await invoke<BatteryStatusDto>(
           "plugin:vcp-mobile|get_battery_status",
         );
         if (!isCurrentAttempt(generation, attempt)) return;
         if (battery) {
-          pushLog("success", "设备状态检查完成");
-
           if (battery.isPowerSaveMode) {
             const terminal = localTerminalError("POWER_SAVE_MODE");
             pushLog("error", terminal.message);
@@ -488,13 +533,20 @@ export const useSyncSessionStore = defineStore("syncSession", () => {
 
             return;
           }
-          if (battery.level > 0 && battery.level < 30) {
+          const level = battery.level;
+          const levelKnown = typeof level === "number" && Number.isFinite(level) && level >= 0 && level <= 100;
+          if (levelKnown && level < 30) {
             const terminal = localTerminalError("BATTERY_TOO_LOW");
             pushLog("error", terminal.message);
             setTerminalError(terminal);
 
             return;
           }
+          pushLog(levelKnown ? "success" : "warning", levelKnown
+            ? "设备状态检查完成"
+            : "无法确认当前电量，将继续同步");
+        } else {
+          pushLog("warning", "无法确认设备状态，将继续同步");
         }
       } catch (error: unknown) {
         if (!isCurrentAttempt(generation, attempt)) return;
@@ -555,7 +607,7 @@ export const useSyncSessionStore = defineStore("syncSession", () => {
     awaitingSessionId = false;
     bufferedSessionEvents = [];
     try {
-      await invoke("stop_sync");
+      await stopAndReload();
       if (!isCurrentAttempt(generation, retryAttempt)) return;
       pushLog("info", "──────── 新同步尝试 ────────");
       status.value = "idle";
@@ -584,8 +636,6 @@ export const useSyncSessionStore = defineStore("syncSession", () => {
 
   const close = async () => {
     if (!isOpen.value || !canDismiss.value) return;
-    const shouldReload = needsReload.value;
-    needsReload.value = false;
     viewGeneration += 1;
     startAttempt += 1;
     isOpen.value = false;
@@ -599,23 +649,17 @@ export const useSyncSessionStore = defineStore("syncSession", () => {
     listenerSetup = null;
 
     try {
-      await invoke("stop_sync");
+      await stopAndReload();
     } catch (e) {
       console.warn("[SyncSession] Failed to stop backend sync session:", e);
-    }
-    if (shouldReload) {
-      try {
-        await useDataReload().performFullReload();
-      } catch (error) {
-        console.error("[SyncSession] Failed to reload synchronized data:", error);
-        useNotificationStore().addNotification({
-          id: "sync_data_reload_failed",
-          type: "error",
-          title: "同步数据刷新失败",
-          message: "界面未能重新加载同步后的数据。请重新打开应用以加载最新数据。",
-          toastOnly: false,
-        });
-      }
+      const terminal = parseCommandError(e, "STOP_SYNC_FAILED");
+      useNotificationStore().addNotification({
+        id: "sync_shutdown_pending",
+        type: "warning",
+        title: "同步尚未完成收尾",
+        message: `${terminal.message} ${terminal.guidance}`,
+        toastOnly: false,
+      });
     }
   };
 

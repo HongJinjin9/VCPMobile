@@ -46,14 +46,14 @@ pub fn find_thermal_zone(keyword: &str) -> Option<String> {
     None
 }
 
-/// Format bytes into human-readable string (e.g. "5.2GB").
+/// Format bytes with the binary units used by these divisions (e.g. "5.2GiB").
 pub fn format_bytes(bytes: u64) -> String {
     const GB: u64 = 1024 * 1024 * 1024;
     const MB: u64 = 1024 * 1024;
     if bytes >= GB {
-        format!("{:.1}GB", bytes as f64 / GB as f64)
+        format!("{:.1}GiB", bytes as f64 / GB as f64)
     } else {
-        format!("{:.0}MB", bytes as f64 / MB as f64)
+        format!("{:.0}MiB", bytes as f64 / MB as f64)
     }
 }
 

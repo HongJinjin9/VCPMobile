@@ -1,6 +1,6 @@
 # Phase 1：平台能力与共享契约
 
-> 历史阶段：2026-10-08 已完成，施工基线 `489b3341`，结果见 07。当时尚未接入 Swift；后续 Phase 2 已接入并于 2026-10-09 删除统一能力表，改为 plugin-os 同步平台身份。原验证结果不重记为本轮执行结果，G1 Apple 构建仍待执行。
+> 历史阶段：2026-10-08 已完成，施工基线 `489b3341`，结果见 07。当时尚未接入 Swift；后续 Phase 2 已接入并于 2026-10-09 删除统一能力表，改为 plugin-os 同步平台身份。用户随后明确最低 iOS/iPadOS 26.0，旧 15.0 是历史输入，现行目标见 [D4](../09-Magi综合裁决与待决策清单.md)。原验证结果不重记为本轮执行结果，G1 Apple 构建仍待执行。
 
 ## 阶段文档
 
@@ -19,7 +19,7 @@ Phase 0 审计交接；重点读取 phase-0/02、03、04。
 
 ## 当时实施范围与后续替代
 
-本阶段曾实施四轴 capability、Android/iOS/host cfg、main ACL、目录 owner 和 lifecycle phase/sequence/snapshot DTO。四轴表、平台查询 IPC/Store 和重复功能门禁已经删除；cfg、真实目录与 lifecycle 契约继续复用。Swift 现只保留实际事件注册，不再查询能力。
+本阶段曾实施四轴 capability、Android/iOS/host cfg、main ACL、目录 owner 和 lifecycle phase/sequence/snapshot DTO。四轴表、平台查询 IPC/Store 和重复功能门禁已经删除；cfg、真实目录与 lifecycle 契约继续复用。Swift 不再查询静态能力；Phase 3 新增通知/设备/传感器的真实操作，见其阶段记录。
 
 当前范围以 [最新逐项审批](../phase-2/09-功能权限与提示审议表.md) 和主线 09 沿革为准，依赖顺序见 [总路线](../08-分期实施路线图与验收门禁.md)。本目录解释当时实现；当前代码与 [Phase 2](../phase-2/README.md) 决定现状。
 

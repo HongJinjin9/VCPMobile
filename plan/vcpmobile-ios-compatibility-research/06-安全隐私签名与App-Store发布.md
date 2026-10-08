@@ -39,7 +39,7 @@ Apple [TN3125](https://developer.apple.com/documentation/technotes/tn3125-inside
 - 改写 `CFBundleIdentifier` 与 `BGTaskSchedulerPermittedIdentifiers` 后，选择或生成匹配最终 App ID 的 profile，并按其授权设置 application-identifier、team/keychain 等 entitlement；profile 本身由 Apple 签发。Swift 从 `Bundle.main.bundleIdentifier` 构造 runtime task ID，并校验与 plist 一致。
 - incoming share 已获批准：P4-4 确定扩展 target 与主 App 交接方式后，将扩展 Bundle ID、共享容器/App Group 以及各 target 的签名输入加入同一改写说明。先核对用户自签可提供的 profile 条件，不假定只有主 App 改 ID 就足够，也不自动要求项目购入付费 Team。
 - Info.plist 留旧 task 前缀而只改 runtime ID，会导致注册/提交不匹配；把该情形列入打包检查与用户说明。
-- minimumSystemVersion 已显式采用 `15.0` 工程基线，G1 Apple 编译结果尚未取得；新增 API 继续核对 deployment target。iOS 26 continued API 使用 availability 分支。
+- minimumSystemVersion 与 Swift package 按用户 2026-10-09 决定采用 iOS/iPadOS `26.0`，G1 Apple 编译结果尚未取得；高于 26.0 的新增 API 仍核对 availability。continued API 的版本下限不再需要旧系统回退，实际任务提交、激活、拒绝和 expiration 仍须处理。
 - 版本保持与 `package.json` / `Cargo.toml` 一致，build version 单独由产物脚本生成并检查格式。
 - Xcode/SDK 组合从 runner 实际库存选择，记录路径与版本；框架 Scene 适配随该组合核对。
 
@@ -50,7 +50,7 @@ Apple [TN3125](https://developer.apple.com/documentation/technotes/tn3125-inside
 3. Android/iOS/host 插件分支已分开，iOS 未接通的 adapter 返回错误，不消费 host fixture；
 4. 共享 Vue 使用同步平台身份处理普通差异；iOS 更新/Root/语音入口给出说明，APK 自动流程只由 Android 启动；原四字段能力表及统一静态门禁已经移除；
 5. API key、sync token、admin/distributed secrets 仍整体序列化进 SQLite settings 并返回前端；这是当前存储事实，本轮没有批准另建 Keychain 或密钥 owner；
-6. Distributed 已获批兼容，继续复用逐工具显式授权与执行 owner；clipboard、notification、location/telemetry 分别消费真实原生结果；
+6. Distributed 的 iOS 连接和工具源码链已接入，继续复用逐工具显式授权与执行 owner；clipboard、notification、location/telemetry 分别消费真实原生结果，Apple 编译/运行仍待验证；
 7. `.gitignore` 已覆盖 `*.p12`、`*.p8`、`*.mobileprovision`，本项目不收集用户签名凭据。
 
 与当前适配直接相关的改动：
@@ -65,18 +65,18 @@ Apple [TN3125](https://developer.apple.com/documentation/technotes/tn3125-inside
 
 每项平台声明对应一个已规划功能及调用者，记录声明到代码的映射。
 
-随对应阶段接入的声明（当前 `Info.ios.plist` 仅包含 Scene 配置，以下不表示已经实现）：
+当前 `Info.ios.plist` 已包含单 Scene、LAN/定位/运动用途及 local-networking ATS 输入；对应原生操作源码在 P3 接入，最终 Apple bundle 尚未取得。声明进度如下：
 
-- `NSLocalNetworkUsageDescription`（P3-1 的用户 LAN 服务）；
-- 收窄的 `NSAllowsLocalNetworking`（只影响对应 Apple URL Loading System 场景）；
+- 已加入 `NSLocalNetworkUsageDescription`（P3-1 的用户 LAN 服务）；
+- 已加入收窄的 `NSAllowsLocalNetworking`（只影响对应 Apple URL Loading System 场景）；
 - 显式 minimum system；
 - continued task 的 permitted identifiers 与 processing mode，按 P5-3 实现；P5-1 若选择其他保活手段，依据实际 API 条件添加对应声明，不能先把某后台模式写入配置就视为连续接收已经成立。
 
 条件项：
 
-- Camera/Photo add-only 在 P4-2、Location/Motion 在 P3-4/P3-5 根据实际访问接入用途说明；语音仍未开发，不预先添加麦克风请求；
+- Location When In Use/Motion 用途已随 P3-4/P3-5 采样接入；Camera/Photo add-only 留给 P4-2；语音仍未开发，不预先添加麦克风请求；
 - Share Extension 的嵌套代码、Bundle ID/profile 及实际需要的 App Group 在 P4-4 确定，P6 验证最终签名输入；
-- 本 App 系统通知在 P3-3 实施，授权请求与通知响应按真实 API 接入；只有另行批准 APNs 时才加入其服务端、profile 和 `aps-environment`；
+- 本 App 系统通知 P3-3 已接授权请求、本地发送与点击响应，不需要虚构通知 usage-description key；只有另行批准 APNs 时才加入其服务端、profile 和 `aps-environment`；
 - 普通 TCP LAN 使用用途说明，Bonjour/multicast 随对应发现/多播功能声明；
 - Document Picker 的 security-scoped 访问与应用自己的 iCloud container 分别按功能配置；
 - 当前 Chat 使用网络/CPU，后台 GPU 等资源随真实计算需求另行声明。
@@ -87,13 +87,13 @@ Apple [TN3125](https://developer.apple.com/documentation/technotes/tn3125-inside
 
 先从源码列出文件时间、时钟、磁盘等实际调用及用途，选择对应 required reason；打包后再对照依赖 manifests、符号和 privacy report 补齐。
 
-当前候选：
+当前声明与其边界：
 
-| Required Reason 类别 | 候选用途 | 核对动作 |
+| Required Reason 类别 | 已声明/候选用途 | 核对动作 |
 |---|---|---|
-| File Timestamp | app container 内 CAS、同步、缓存清理；外部 picker URL metadata | 只声明最终实际使用的 Apple reason |
-| System Boot Time | Rust/Tokio monotonic time 可能落 `mach_absolute_time` | 以 Apple 链接产物确认 |
-| Disk Space | 下载/写入前决策或用户可见容量 | 沿实际 capacity 调用选择用途 |
+| File Timestamp | 现有清单 `C617.1`；app container 内 CAS、同步、缓存 | P4 外部文件访问加入后按真实调用重审 |
+| System Boot Time | 现有清单 `35F9.1`；Rust/Tokio monotonic time | 以 Apple 链接产物确认 |
+| Disk Space | 本轮加入 `85F4.1`，对应实际用户可见的本机容量样本 | 此理由不构成任意远程 telemetry 用途已符合 App Store 要求的声明；当前用户自签范围如实记录，不新增功能门禁或扩大渠道合规工程 |
 | User Defaults / Active Keyboards | 从框架和业务调用中查找 | 找到使用方后登记 reason |
 
 数据清单记录 Chat/Diary/Mail、附件、日志、标识符等实际传输目的地与用途；追踪字段从业务及依赖调用核对。未来进入 App Store 时复用这份清单生成渠道要求的隐私标签。

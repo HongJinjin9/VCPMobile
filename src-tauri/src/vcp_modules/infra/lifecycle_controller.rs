@@ -1,5 +1,4 @@
 use crate::vcp_modules::infra::lifecycle_state::{LifecycleSnapshot, LifecycleState};
-#[cfg(not(target_os = "ios"))]
 use crate::vcp_modules::settings_manager::{read_settings, SettingsState};
 #[cfg(any(not(target_os = "ios"), test))]
 use std::sync::atomic::AtomicBool;
@@ -45,7 +44,7 @@ pub fn is_app_in_foreground<R: tauri::Runtime>(app: &AppHandle<R>) -> bool {
     if let Some(state) = app.try_state::<LifecycleState>() {
         state.is_foreground.load(Ordering::SeqCst)
     } else {
-        true
+        !cfg!(target_os = "ios")
     }
 }
 
@@ -128,10 +127,58 @@ async fn apply_lifecycle_transition(app: AppHandle, snapshot: LifecycleSnapshot)
         is_foreground
     );
 
-    // iOS publishes the native phase through this same owner; bounded domain policy is Phase 3.
-    // Android leases and linger timers must never run on the iOS branch.
+    // iOS uses the same transition owner without importing Android leases/linger.
+    #[cfg(target_os = "ios")]
+    reconcile_ios_foreground_services(&app, is_foreground).await;
     #[cfg(not(target_os = "ios"))]
     reconcile_foreground_services(&app, &state, is_foreground).await;
+}
+
+#[cfg(target_os = "ios")]
+async fn reconcile_ios_foreground_services(app: &AppHandle, is_foreground: bool) {
+    crate::vcp_modules::vcp_log_service::handle_foreground_state_change(app, is_foreground).await;
+    if !is_foreground {
+        // Persistent connection tasks become idle; their socket operations have
+        // deadlines. This does not cancel a Chat SSE attempt or choose a Phase 5 lease.
+        let stop_log_connections = async {
+            // Serialize with a settings update which may have observed the old
+            // foreground value before this transition. Its URL intent must not
+            // overwrite the subsequent background stop intent.
+            let settings = app.state::<SettingsState>();
+            let _runtime_guard = settings.lock_runtime_reconcile().await;
+            crate::vcp_modules::vcp_log_service::disconnect_log_connections(app).await;
+        };
+        let stop_distributed = async {
+            if let Some(distributed) = app.try_state::<crate::distributed::DistributedState>() {
+                let _reconciliation = distributed.reconciliation.lock().await;
+                distributed.client.read().await.stop(app).await;
+            }
+        };
+        let (_, _, sync_result) = tokio::join!(
+            stop_log_connections,
+            stop_distributed,
+            crate::vcp_modules::sync_service::suspend_sync_for_background(app),
+        );
+        if let Err(error) = sync_result {
+            log::warn!("[Lifecycle] Background sync shutdown: {error}");
+        }
+        return;
+    }
+
+    crate::vcp_modules::vcp_log_service::flush_background_logs(app);
+    let settings_state = app.state::<SettingsState>();
+    let _runtime_guard = settings_state.lock_runtime_reconcile().await;
+    match read_settings(app.clone(), app.state()).await {
+        Ok(settings) => {
+            crate::vcp_modules::vcp_log_service::reconnect_log_connections(
+                app, settings.vcp_log_url, settings.vcp_log_key,
+            ).await;
+            crate::vcp_modules::infra::lifecycle_reconciler::reconcile_distributed_node(app, false).await;
+        }
+        Err(error) => log::warn!("[Lifecycle] Cannot restore configured foreground connections: {error}"),
+    }
+    // Manual Sync is never restarted by foreground restoration. Chat reattaches
+    // through its existing output owner; it is not reissued from lifecycle.
 }
 
 #[cfg(not(target_os = "ios"))]

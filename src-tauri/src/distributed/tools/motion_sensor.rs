@@ -13,7 +13,7 @@ impl StreamingTool for MotionSensorTool {
     fn manifest(&self) -> ToolManifest {
         ToolManifest {
             name: "MobileMotion".to_string(),
-            description: "采集设备的三轴加速度、陀螺仪旋转向量与磁力计取向，识别物理运动姿态。"
+            description: "按需采集设备加速度、陀螺仪和磁力计读数；缺失硬件逐项说明，传感器数值不等同于已识别的活动类型。"
                 .to_string(),
             display_name: "九轴运动传感器".to_string(),
             placeholder: Some("{{MobileMotion}}".to_string()),

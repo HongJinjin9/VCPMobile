@@ -1,6 +1,6 @@
 # 03. WebKit 与 iPhone/iPad 交互适配
 
-> 2026-10-09 修订：对照 `c46a3c48` 及当前工作树，保留现有组件与状态所有者，按最新功能审批逐入口适配。未取得 Apple 构建或 iOS 运行结果。
+> 2026-10-09 修订：对照 Phase 3 基线 `8207ec70` 及当前工作树，保留现有组件与状态所有者，按最新功能审批逐入口适配。未取得 Apple 构建或 iOS 运行结果。
 
 ## 当前前端与待适配交互
 
@@ -8,12 +8,12 @@
 
 ### 已变化的生产事实
 
-- `appLifecycle.ts` 仅在 Android 启动时执行原通知/电池/通知监听检查及对应异常告知。`PermissionGate` 共用挂载和外壳，当前项目列表仅有 Android 已接入权限；iOS 暂无启动权限项，不请求 Android 命令。共同引导后续随真实权限接入补项。
+- `appLifecycle.ts` 仅在 Android 启动时执行原通知/电池/通知监听检查。共同 `PermissionGate` 已增加 iOS 本 App 通知可选项目，首次未询问可开启或继续；拒绝/查询失败不阻断聊天。通知中心提供权限/设置入口并在返回前台刷新，不持久镜像 OS 授权。
 - 当前 Router 只有 `/` 重定向到 `/chat`；Settings、Agent、Task 等主要由 overlay/page stack 承载。
 - `WebGLFluidBackground` 已处理关闭停帧、context lost/restored 和 DPR 限制；仍缺 app background/visibility 与 `prefers-reduced-motion` 收口。
 - 版本更新入口已保留，iOS 点击说明 App 外自签；`useAutoUpdate` 的初始化/延时检查和 `UpdatePrompt` 仍限 Android，不在 iOS 请求 APK。
 - 语音按钮在 iOS 保留，触摸开始或独立点击给出未开发说明；不启动录音计时/麦克风，触摸结束不切入语音模式。Android 语音行为保留。
-- Distributed 页面已可展示目录、连接配置和授权偏好；iOS Root 点击说明，节点运行与设备工具执行尚未接入。CLI 仍沿当前 Android 范围；不能将页面可见写成原生工具已可用。
+- Distributed iOS 页面已接真实连接、断开、目录/授权与样本读取；通知工具启用处理真实系统授权，Root/CLI 保留说明。配置读取/保存及返回值沿本次操作归约，单项设备数据缺失正常展示；源码接通不等于 Apple 运行通过。
 - 文件/图片聊天入口仍有 HTML 子路径，头像和重型附件点击有具体说明；相机、相册保存、原生打开等尚待各自 adapter。最新审批已纳入这些原生能力，不能继续列为永久隐藏或旧范围延期。
 - `src/core/utils/platform.ts` 通过 `plugin-os` 同步提供 `isAndroid/isIOS`，不依赖 UA、能力查询或启动重试；旧 `PlatformCapabilities` 和前端平台 Store 已删除。
 
@@ -24,7 +24,7 @@
 - 共同权限引导：按平台真实项目展示、请求和刷新；iOS 无 OEM 自启动、通知访问或电池豁免项目，不以假授权填满 Android 步骤；
 - 更新/Root/语音：保留已接入的说明入口与自动路径隔离，不因显示按钮而初始化原生执行；
 - 缓存：共享维护页已用运行时文案区分 WebView/WebKit，iOS 当前显示尚未接入；真正清理后才报告成功，预渲染维护继续由原 owner 处理；
-- 已批准的 incoming/outgoing share、本 App 系统通知、相机、相册、网络遥测和 Distributed：逐条连接原生操作、取消和结果，权限拒绝与未实现分开；系统通知不自动扩展为完整 APNs；
+- 本 App 系统通知、网络/设备与 Distributed 的 P3 源码链已接通，继续回扫权限拒绝、取消及实际结果；incoming/outgoing share、相机、相册仍归 P4，系统通知不自动扩展为完整 APNs；
 - Files/PHPicker/export/open：原生附件仍为 P0，HTML 输入不是完成依据；iPad 原生展示需正确锚点；
 - lifecycle/网络恢复：保留 iOS 首次真实 active、native sequence/epoch 与同一恢复 owner；旧能力字段不能替代这些实时状态。
 
@@ -82,7 +82,7 @@ Android vcp-keyboard-inset
 
 `vite.config.ts` 当前仍只写 `chrome87`，Vitest 仍是 `happy-dom`。施工时：
 
-- 按已配置的 iOS minimum 15.0 和实际依赖，给 Vite 核对对应 Safari 语法目标；本轮同步平台身份不需要两套前端产物；
+- 按用户已确定的 iOS/iPadOS minimum 26.0 和实际依赖，给 Vite 核对对应 Safari 语法目标；本轮同步平台身份不需要两套前端产物；
 - 逐项核对实际使用的 CSS/API availability，区分构建语法转换、运行 API 与样式 fallback；
 - 针对改动中真实不确定的输入核对 morphdom/DOM engine、KaTeX、Mermaid、raw HTML sandbox、`iframe.srcdoc`、Canvas、`content-visibility`、asset protocol、字体和剪贴板；复用已有 fixture，不把研究结论机械复制成测试；
 - WebGL 已有 active 停帧、context lost/restored 与 DPR 1.5 上限，补生命周期 visibility/reduced-motion 的停启路径；

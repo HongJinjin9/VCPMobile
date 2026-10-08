@@ -17,7 +17,7 @@ impl StreamingTool for StorageInfoTool {
     fn manifest(&self) -> ToolManifest {
         ToolManifest {
             name: "MobileStorageInfo".to_string(),
-            description: "监控系统分区与用户分区的空闲/已用空间大小，预估磁盘健康度。".to_string(),
+            description: "读取应用所在存储卷的总量与可用空间；不代表应用自身占用或磁盘健康度。".to_string(),
             display_name: "磁盘存储监控".to_string(),
             placeholder: Some("{{MobileStorage}}".to_string()),
             invocation_commands: vec![],
@@ -35,7 +35,7 @@ impl StreamingTool for StorageInfoTool {
     fn read_current(&self, app: &tauri::AppHandle) -> Result<String, String> {
         use tauri::Manager;
         let dist_state = app.state::<crate::distributed::DistributedState>();
-        let storage_info = dist_state.telemetry.get_storage_info();
+        let storage_info = dist_state.telemetry.get_storage_info(app);
         Ok(storage_info)
     }
 }

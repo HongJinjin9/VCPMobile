@@ -2,7 +2,7 @@
 
 > 审计日期：2026-10-08。基线 HEAD：`4c6e25bba72a9883f4c5270c1daf2493850bd04e`。输入为本次工作树中的生产配置、锁文件、已安装 crate 源码与锁定 CLI tag。本文是源码分析和工程输入清单，不是 Apple 编译结果。
 
-2026-10-09 校准：第 1–6 节保留上述依赖版本和源码推导，**不作为当前版本、未完成状态或仍需从零实施的任务表**。当前 Tauri 为 2.12.1、tao 0.37.1，Swift/Channel、minimum 15.0 和 G1 输入已落地；活动 DEP 项见第 7 节，最新工程证据见 [Phase 2](../phase-2/README.md)。本次没有改写原 cargo tree 结果或运行新构建。
+2026-10-09 校准：第 1–6 节保留上述依赖版本和源码推导，**不作为当前版本、未完成状态或仍需从零实施的任务表**。当前 Tauri 为 2.12.1、tao 0.37.1，Swift/Channel 和 G1 输入已落地；用户后续已明确最低 iOS/iPadOS 26.0，下面历史 15.0 不再是施工目标。活动 DEP 项见第 7 节，最新工程证据见 [Phase 3](../phase-3/README.md)。本次没有改写原 cargo tree 结果或运行新构建。
 
 ## 1. 本阶段结论与证据范围
 
@@ -141,11 +141,11 @@ CLI build 按顺序合并生成 Info.plist、版本值、根 `Info.plist`、`Inf
 | DEP-03 | 已撤除额外集中 resolution 控制，使用正常 SwiftPM 解析 | 工程生成 / G1 | 依据实际解析/编译日志诊断，不宣称各 root 被脚本统一到同一 revision |
 | DEP-04 | 已迁至 tao 0.37.1 并完成单 Scene 源码修正 | framework / Phase 2、G1 | 保留首窗口/重连 owner；实际 Apple 工程结果待执行 |
 | DEP-05 | 注册 receiver 已独立保活，仅一个在途槽位；能力查询已删除 | native bridge / Phase 2 | 后续任务继续保留最终回调接收和真实资源释放，不重复引入第二查询链 |
-| DEP-06 | 15.0 已写入 Tauri/Swift/G1 输入 | Apple build / G1 | 实际最低系统编译核验未取得 |
+| DEP-06 | 用户明确 minimum 26.0，已写入 Tauri/Swift；旧 15.0 是历史输入 | Apple build / G1 | 实际最低系统编译核验未取得 |
 | DEP-07 | 已确定 feature：SQLite extension 编入；无已找到业务调用 | persistence / Phase 3 | 不新增动态扩展入口；SQLite temp/锁/容量路径明确 |
 | DEP-08 | zstd/sqlite 环境覆盖规则不同，构建输入须继续受控 | 构建环境 / G1/G2 | 三个原生库的真实 flags、SDK 与静态链接结果 |
 | DEP-09 | G1 候选 runner/Xcode/SDK 已固定；尚无执行记录 | Actions 输入 / G1/G2 | 按当前 CLI 核对实际 runtime 库存，不增加常驻 Simulator 体系 |
 | DEP-10 | plist/Scene/privacy/AppIcon overlay 已可重放 | 工程生成 / G1 | 源码检查保留，实际 archive/bundle 装配待核验 |
-| DEP-11 | 新批准权限/通知/设备、媒体分享和后台 API 尚需逐项细化 | Swift adapter / Phase 3/4/5 | 按当前部署下限核对实际 API、部分字段/取消结果；不恢复已覆盖的旧延期 |
+| DEP-11 | P3 权限/通知/设备及 Distributed 源码已接；P4 媒体分享、P5 后台仍待实施 | Swift adapter / Phase 3/4/5 | 按当前部署下限核对实际 API、部分字段/取消结果；本地证据与 Apple 结果分别记录，不恢复已覆盖的旧延期 |
 
 Phase 0 的历史完成结论不等于所有 DEP 后续实现已完成；本表只更新当前活动问题。Apple 产物验证仍在 G1/G2 取得，具体诊断回到实际 owner 修复。

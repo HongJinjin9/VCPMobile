@@ -6,6 +6,7 @@ import { useSettingsStore } from "../../core/stores/settings";
 import { useNotificationStore } from "../../core/stores/notification";
 import { isAndroid, isIOS } from "../../core/utils/platform";
 import { useDistributed } from "./composables/useDistributed";
+import { isNotificationAuthorized, openNotificationSettings, readNotificationPermission, requestNotificationPermission } from "../notification/nativeNotifications";
 import SlidePage from "../../components/ui/SlidePage.vue";
 
 // Atomic settings UI components
@@ -49,7 +50,7 @@ const connectionFieldsDisabled = computed(() =>
 );
 const canSaveConnection = computed(() =>
   props.isOpen && !connectionFieldsDisabled.value &&
-  (!isAndroid || Boolean(wsUrl.value && vcpKey.value)),
+  Boolean(wsUrl.value.trim() && vcpKey.value.trim()),
 );
 
 // Interface types
@@ -286,7 +287,7 @@ const retryToolCatalog = () => {
   void loadPluginsMetadata(viewGeneration);
 };
 
-const ensureAndroidToolPermission = async (plugin: PluginItem): Promise<boolean> => {
+const ensureAndroidToolPermission = async (plugin: PluginItem, view: number): Promise<boolean> => {
   let requiredAlias: "location" | "notification" | null = null;
   if (plugin.id === "MobileLocation") requiredAlias = "location";
   else if (plugin.id === "MobileNotification") requiredAlias = "notification";
@@ -296,6 +297,7 @@ const ensureAndroidToolPermission = async (plugin: PluginItem): Promise<boolean>
     const permissions = await invoke<PermissionStatusDto>(
       "plugin:vcp-mobile|check_all_permissions",
     );
+    if (!isCurrentView(view)) return false;
     if (!permissions || permissions[requiredAlias] === undefined) {
       throw new Error(`权限状态缺少 ${requiredAlias}`);
     }
@@ -310,9 +312,11 @@ const ensureAndroidToolPermission = async (plugin: PluginItem): Promise<boolean>
     await invoke("plugin:vcp-mobile|request_android_permission", {
       pType: requiredAlias,
     });
+    if (!isCurrentView(view)) return false;
     const verified = await invoke<PermissionStatusDto>(
       "plugin:vcp-mobile|check_all_permissions",
     );
+    if (!isCurrentView(view)) return false;
     if (!verified || verified[requiredAlias] !== true) {
       notificationStore.addNotification({
         type: "warning",
@@ -325,6 +329,7 @@ const ensureAndroidToolPermission = async (plugin: PluginItem): Promise<boolean>
     return true;
   } catch (error) {
     console.error("[DistributedView] Failed to verify system permissions:", error);
+    if (!isCurrentView(view)) return false;
     notificationStore.addNotification({
       type: "error",
       title: "权限校验失败",
@@ -335,8 +340,30 @@ const ensureAndroidToolPermission = async (plugin: PluginItem): Promise<boolean>
   }
 };
 
+const ensureIOSToolPermission = async (plugin: PluginItem, view: number): Promise<boolean> => {
+  if (plugin.id !== "MobileNotification") return true;
+  try {
+    let permission = await readNotificationPermission();
+    if (!isCurrentView(view)) return false;
+    if (permission.authorization === "notDetermined") permission = await requestNotificationPermission();
+    if (!isCurrentView(view)) return false;
+    if (isNotificationAuthorized(permission)) return true;
+    if (permission.authorization === "denied") await openNotificationSettings();
+    if (!isCurrentView(view)) return false;
+    notificationStore.addNotification({ type: "info", title: "通知权限未开启", message: "工具保持未启用；在系统设置允许通知后，可返回这里再次启用。", toastOnly: true });
+  } catch (error) {
+    if (!isCurrentView(view)) return false;
+    notificationStore.addNotification({ type: "error", title: "无法确认通知权限", message: String(error), toastOnly: true });
+  }
+  return false;
+};
+
 const toggleToolEnabled = async (plugin: PluginItem) => {
   if (authorizationSwitchesDisabled.value) return;
+  if (isIOS && plugin.id === "VCPMobileCLI" && !plugin.enabled) {
+    notificationStore.addNotification({ type: "info", title: "Android CLI 未迁移", message: "iOS 不提供此 Android 终端运行环境；其他分布式工具可独立启用。", toastOnly: true });
+    return;
+  }
 
   const owner: AuthorizationMutationOwner = {
     id: ++nextAuthorizationMutationId,
@@ -353,7 +380,8 @@ const toggleToolEnabled = async (plugin: PluginItem) => {
 
   let mutationSucceeded = false;
   try {
-    if (targetState && isAndroid && !(await ensureAndroidToolPermission(plugin))) return;
+    if (targetState && isAndroid && !(await ensureAndroidToolPermission(plugin, owner.viewGeneration))) return;
+    if (targetState && isIOS && !(await ensureIOSToolPermission(plugin, owner.viewGeneration))) return;
     if (!ownsAuthorizationMutation(owner) || !isCurrentView(owner.viewGeneration)) return;
 
     await invoke("update_enabled_tools", {
@@ -466,14 +494,14 @@ const handleConnect = async () => {
       distributedWsUrl: wsUrl.value,
       distributedVcpKey: vcpKey.value,
       distributedDeviceName: deviceName.value,
-      ...(isAndroid ? { distributedEnabled: true } : {}),
+      distributedEnabled: true,
     });
   } catch (e: any) {
     console.error("[DistributedView] Connection start failed:", e);
     if (isCurrentView(view)) {
       notificationStore.addNotification({
         type: "error",
-        title: isAndroid ? "连接设置保存失败" : "分布式配置保存失败",
+        title: "连接设置保存失败",
         message: String(e),
         toastOnly: true,
       });
@@ -484,12 +512,17 @@ const handleConnect = async () => {
 };
 
 const handleDisconnect = async () => {
+  if (connectionSaving.value) return;
+  connectionSaving.value = true;
   try {
     if (settingsStore.settings) {
       await settingsStore.updateSettings({ distributedEnabled: false });
     }
   } catch (e: any) {
     console.error("[DistributedView] Connection stop failed:", e);
+    notificationStore.addNotification({ type: "error", title: "断开连接失败", message: String(e), toastOnly: true });
+  } finally {
+    connectionSaving.value = false;
   }
 };
 
@@ -525,30 +558,20 @@ const togglePluginDetails = (plugin: PluginItem) => {
 // Reading a sample is intentionally separate from catalog browsing. Some OneShot tools have
 // external side effects, so expanding a row must never execute a tool.
 const readPluginSample = async (plugin: PluginItem) => {
-  if (!isAndroid) {
-    notificationStore.addNotification({
-      type: "info",
-      title: "设备工具尚未适配",
-      message: isIOS
-        ? "当前 iOS 版本尚未接入设备工具执行，可浏览目录并保存工具授权配置。"
-        : "设备工具执行目前仅在 Android 客户端可用。",
-      toastOnly: true,
-    });
-    return;
-  }
   if (
     plugin.type !== "streaming" ||
     !plugin.enabled ||
-    pluginLoading.value[plugin.id]
+    pluginLoading.value[plugin.id] || authorizationMutationPending.value
   ) {
     return;
   }
   const view = viewGeneration;
+  const scan = scanGeneration;
   pluginLoading.value[plugin.id] = true;
 
   try {
     const res = await invoke<string>("execute_distributed_tool", { name: plugin.id });
-    if (!isCurrentView(view)) return;
+    if (!isCurrentScan(view, scan) || !pluginsList.value.some(tool => tool.id === plugin.id && tool.enabled)) return;
     
     // 解析是否含有折叠块协议
     const blocks = parseFoldBlocks(res);
@@ -572,8 +595,8 @@ const readPluginSample = async (plugin: PluginItem) => {
     }
   } catch (e: any) {
     console.error(`[DistributedView] Failed to pull native sensor telemetry for ${plugin.id}:`, e);
-    if (isCurrentView(view)) {
-      pluginData.value[plugin.id] = `遥测读取异常:\n${e.toString()}\n(请检查移动端传感器硬件模块是否正常运行或对应的 JNI 权限是否已授予)`;
+    if (isCurrentScan(view, scan)) {
+      pluginData.value[plugin.id] = `遥测读取异常:\n${e.toString()}`;
     }
   } finally {
     if (isCurrentView(view)) pluginLoading.value[plugin.id] = false;
@@ -781,9 +804,8 @@ onBeforeUnmount(() => {
       <div class="flex-1 overflow-y-auto no-rubber-band relative pb-[calc(var(--vcp-safe-bottom,48px))]">
         <!-- 1. Connection view -->
         <div v-if="activeTab === 'connection'" class="px-4 py-6 space-y-6">
-          <p v-if="!isAndroid" class="border-l-2 border-black/20 pl-3 text-xs leading-relaxed opacity-65 dark:border-white/20">
-            {{ isIOS ? '当前 iOS 版本尚未接入分布式节点运行和设备工具执行。' : '分布式节点运行目前仅在 Android 客户端可用。' }}
-            可保存连接信息和工具授权配置；保存配置不会启动节点。
+          <p v-if="isIOS" class="border-l-2 border-black/20 pl-3 text-xs leading-relaxed opacity-65 dark:border-white/20">
+            节点在前台连接，进入后台后断开，回到前台按连接设置恢复。工具只返回系统实际提供的数据；Android CLI 与 Root 不在 iOS 上执行。
           </p>
           <!-- Connection Status Card -->
           <div class="bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 p-4 rounded-2xl flex items-center justify-between">
@@ -805,9 +827,9 @@ onBeforeUnmount(() => {
             </div>
             <div class="flex gap-2">
               <button
-                v-if="status.connected"
+                v-if="status.state !== 'disconnected'"
                 @click="handleDisconnect"
-                :disabled="status.state === 'disconnecting'"
+                :disabled="connectionSaving || status.state === 'disconnecting'"
                 class="px-4 py-1.5 bg-red-500/20 text-red-500 text-xs font-bold rounded-xl active:scale-95 transition-all hover:bg-red-500/30 disabled:opacity-50"
               >
                 断开连接
@@ -819,7 +841,7 @@ onBeforeUnmount(() => {
                 class="px-4 py-1.5 text-white text-xs font-bold rounded-xl active:scale-95 transition-all disabled:opacity-50"
                 style="background-color: var(--highlight-text)"
               >
-                {{ connectionSaving ? '保存中...' : isAndroid ? (status.state === 'connecting' ? '连接中...' : '连接') : '保存配置' }}
+                {{ connectionSaving ? '保存中...' : '连接' }}
               </button>
             </div>
           </div>
@@ -1179,6 +1201,9 @@ onBeforeUnmount(() => {
                 <div class="text-[10px] opacity-70 leading-relaxed text-primary-text border-b border-black/5 dark:border-white/5 pb-2.5">
                   <span class="font-bold opacity-50 text-[8px] uppercase tracking-wider block mb-1">功能描述 / Description</span>
                   {{ plugin.description }}
+                  <p v-if="isIOS && plugin.id === 'VCPMobileCLI'" class="mt-1">
+                    Android CLI 未迁移到 iOS，此工具不会在 iOS 节点发布或执行。
+                  </p>
                 </div>
 
                 <div class="flex justify-between items-center gap-3 text-[9px] uppercase font-bold tracking-wider">
@@ -1189,11 +1214,11 @@ onBeforeUnmount(() => {
                     v-if="plugin.type === 'streaming'"
                     type="button"
                     :data-tool-read="plugin.id"
-                    :disabled="isAndroid && (!plugin.enabled || pluginLoading[plugin.id] || authorizationMutationPending)"
+                    :disabled="!plugin.enabled || pluginLoading[plugin.id] || authorizationMutationPending"
                     @click.stop="readPluginSample(plugin)"
                     class="px-2 py-1 bg-black/8 dark:bg-white/8 rounded-md flex items-center gap-1 transition-opacity text-[8px] disabled:opacity-35 disabled:cursor-not-allowed"
                   >
-                    {{ !isAndroid ? '适配说明' : pluginLoading[plugin.id] ? '读取中…' : (plugin.enabled ? '读取样本' : '授权后可读取') }}
+                    {{ pluginLoading[plugin.id] ? '读取中…' : (plugin.enabled ? '读取样本' : '授权后可读取') }}
                   </button>
                   <span v-else class="normal-case text-right text-[9px] font-normal opacity-55">
                     需由 VCP 请求明确调用
@@ -1241,7 +1266,7 @@ onBeforeUnmount(() => {
                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
                   </svg>
-                  <span class="font-mono text-[10px]">JNI 物理通道拉取中...</span>
+                  <span class="font-mono text-[10px]">正在读取设备数据...</span>
                 </div>
 
                 <div v-else class="space-y-2">

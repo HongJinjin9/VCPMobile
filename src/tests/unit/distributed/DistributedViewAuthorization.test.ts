@@ -122,7 +122,7 @@ describe("DistributedView explicit tool authorization", () => {
     }
   });
 
-  it("waits for loaded connection fields and saves once without starting an iOS node", async () => {
+  it("waits for loaded connection fields and enables the iOS node in one save", async () => {
     testPlatform.value = 'ios';
     installBaseMocks([]);
     const loaded = {
@@ -137,7 +137,7 @@ describe("DistributedView explicit tool authorization", () => {
     const wrapper = mountWithPinia(DistributedView, { props: { isOpen: true } });
     try {
       await flushPromises();
-      const button = wrapper.findAll('button').find(item => item.text() === '保存配置')!;
+      const button = wrapper.findAll('button').find(item => item.text() === '连接')!;
       expect(button.attributes()).toHaveProperty('disabled');
       await button.trigger('click');
       expect(invokeMock.mock.calls.some(([command]) => command === 'update_settings')).toBe(false);
@@ -150,7 +150,7 @@ describe("DistributedView explicit tool authorization", () => {
       expect(button.attributes()).toHaveProperty('disabled');
       await button.trigger('click');
       const writes = invokeMock.mock.calls.filter(([command]) => command === 'update_settings');
-      expect(writes).toEqual([['update_settings', { updates: loaded }]]);
+      expect(writes).toEqual([['update_settings', { updates: { ...loaded, distributedEnabled: true } }]]);
 
       save.resolve(loaded);
       await flushPromises();
@@ -180,7 +180,7 @@ describe("DistributedView explicit tool authorization", () => {
       await wrapper.setProps({ isOpen: true });
       await flushPromises();
       expect(wrapper.get('[role="alert"]').text()).toContain('加载失败');
-      const saveButton = wrapper.findAll('button').find(item => item.text() === '保存配置')!;
+      const saveButton = wrapper.findAll('button').find(item => item.text() === '连接')!;
       expect(saveButton.attributes()).toHaveProperty('disabled');
       await saveButton.trigger('click');
       expect(invokeMock.mock.calls.some(([command]) => command === 'update_settings')).toBe(false);
@@ -192,7 +192,7 @@ describe("DistributedView explicit tool authorization", () => {
       expect(saveButton.attributes()).not.toHaveProperty('disabled');
       await saveButton.trigger('click');
       await flushPromises();
-      expect(invokeMock).toHaveBeenCalledWith('update_settings', { updates: fresh });
+      expect(invokeMock).toHaveBeenCalledWith('update_settings', { updates: { ...fresh, distributedEnabled: true } });
     } finally {
       wrapper.unmount();
     }
@@ -438,7 +438,8 @@ describe("DistributedView explicit tool authorization", () => {
     wrapper.unmount();
   });
 
-  it("expands every tool without execution and reads only an authorized streaming snapshot", async () => {
+  it.each(['android', 'ios'] as const)("%s expands every tool without execution and reads only an enabled streaming snapshot", async (platform) => {
+    testPlatform.value = platform;
     installBaseMocks([
       {
         name: "VCPMobileCLI",
@@ -523,6 +524,64 @@ describe("DistributedView explicit tool authorization", () => {
     ).toBe("false");
 
     wrapper.unmount();
+  });
+
+  it("can stop an iOS node while the socket is still connecting", async () => {
+    testPlatform.value = 'ios';
+    installBaseMocks([]);
+    mockInvoke('get_distributed_status', () => ({ ...disconnectedStatus, state: 'connecting' }));
+    mockInvoke('update_settings', () => ({ distributedEnabled: false }));
+    const wrapper = mountWithPinia(DistributedView, { props: { isOpen: true } });
+    try {
+      await flushPromises();
+      await wrapper.findAll('button').find(button => button.text() === '断开连接')!.trigger('click');
+      await flushPromises();
+      expect(invokeMock).toHaveBeenCalledWith('update_settings', { updates: { distributedEnabled: false } });
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
+  it("does not persist an iOS notification tool after authorization is denied", async () => {
+    testPlatform.value = 'ios';
+    installBaseMocks([{ name: 'MobileNotification', category: 'oneshot', enabled: false }]);
+    mockInvoke('plugin:vcp-mobile|get_notification_permission', () => ({ authorization: 'notDetermined' }));
+    mockInvoke('plugin:vcp-mobile|request_notification_permission', () => ({ authorization: 'denied' }));
+    mockInvoke('plugin:vcp-mobile|open_notification_settings', () => undefined);
+    const wrapper = await mountOpenView();
+    try {
+      await waitForCatalog();
+      await wrapper.get('[data-tool-switch="MobileNotification"]').trigger('click');
+      await flushPromises();
+      expect(invokeMock).toHaveBeenCalledWith('plugin:vcp-mobile|request_notification_permission');
+      expect(invokeMock.mock.calls.some(([command]) => command === 'update_enabled_tools')).toBe(false);
+      expect(wrapper.get('[data-tool-switch="MobileNotification"]').attributes('aria-checked')).toBe('false');
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
+  it("drops a sample that finishes after the tool was disabled", async () => {
+    testPlatform.value = 'ios';
+    const tool = { name: 'MobileMotionSensor', category: 'streaming' as const, enabled: true };
+    installBaseMocks([tool]);
+    const sample = deferred<string>();
+    mockInvoke('execute_distributed_tool', () => sample.promise);
+    mockInvoke('update_enabled_tools', () => { tool.enabled = false; });
+    const wrapper = await mountOpenView();
+    try {
+      await waitForCatalog();
+      await wrapper.get('[data-tool-details="MobileMotionSensor"]').trigger('click');
+      await wrapper.get('[data-tool-read="MobileMotionSensor"]').trigger('click');
+      await wrapper.get('[data-tool-switch="MobileMotionSensor"]').trigger('click');
+      await flushPromises();
+      sample.resolve('late sensor success');
+      await flushPromises();
+      expect(wrapper.text()).not.toContain('late sensor success');
+      expect(wrapper.text()).toContain('授权后可读取样本');
+    } finally {
+      wrapper.unmount();
+    }
   });
 
   it("shows catalog errors and retries without coupling to connection settings", async () => {

@@ -1,26 +1,26 @@
 # VCPMobile iOS 兼容适配专项研究
 
-> 修订：2026-10-09。最初研究基线：`4c6e25bb`；本次对照 `c46a3c48` 及当前工作树，VCPMobile `1.1.6`。历史执行结果保留其原基线。
+> 修订：2026-10-09。最初研究基线：`4c6e25bb`；本轮 Phase 3 从 `8207ec70` 实施，VCPMobile `1.1.6`。历史执行结果保留其原基线。
 >
 > 目标：同一 Vue/Rust 核心的 iPhone/iPad 实验性客户端；开发采用源码与编译语义推演，产物供用户自行签名。
 
 ## 分期实施工作区（2026-10-08 启动）
 
-2026-10-09：按用户最新逐项审批继续适配。Tauri 已升级到 2.12.1，本轮已将平台识别收缩为 `plugin-os` 同步身份与 Vue 运行时分支，更新、Root、语音等入口按实际动作说明。G1 Apple 构建仍未执行；恢复源码工作不表示已经获得 Apple 编译结果或授权推送/运行 Actions。
+2026-10-09：沿既有 `plugin-os` 同步身份与 Vue 运行时分支进入 Phase 3，接入共同通知权限、本 App 本地通知/冷启动点击、设备/传感器、剪贴板与 iOS Distributed，并处理 Chat 输出接管、Sync/LAN 生命周期。具体源码结果和本地验证见阶段三记录。G1 Apple 构建仍未执行，不以源码或 host 检查宣称原生编译/运行已通过。
 
-本目录 00–09 是后续施工使用的专题研究，按 [Phase 2 功能审批](./phase-2/09-功能权限与提示审议表.md) 更新范围与任务。每个 Phase 使用独立目录保存子规划、审计和验收记录；Phase 0/1 的完成记录属于各自基线，Phase 2 正在复审和简化平台接入、G1 待执行，Phase 3–6 仍为阶段入口。本轮没有实现全部新批准功能。
+本目录 00–09 是后续施工使用的专题研究，按 [Phase 2 功能审批](./phase-2/09-功能权限与提示审议表.md) 更新范围与任务。每个 Phase 保存对应施工和证据；Phase 0/1 的完成记录属于各自基线，Phase 2 源码接入和平台简化已有记录、G1 待执行。Phase 3 授权源码链已接入、复审及 Vue/host 检查通过，领域结果见阶段记录；Phase 4–6 仍待实施。本轮不扩展为全部原生媒体/分享或 SSE 后台功能。
 
 | 工作区 | 当前职责 |
 |---|---|
 | [Phase 0](./phase-0/README.md) | 已完成输入与目标源码审计；具体证据和后续问题见阶段验收记录 |
 | [Phase 1](./phase-1/README.md) | 保存 cfg/ACL、目录与生命周期契约的阶段证据；当时的统一能力表已被本轮轻量平台身份替代 |
 | [Phase 2](./phase-2/README.md) | Swift/Channel/生命周期与可重放工程已接入；复审、修正及平台简化见阶段记录，G1 Apple 构建待执行 |
-| [Phase 3](./phase-3/README.md) | 前台核心、共同权限、本 App 系统通知与设备/网络/Distributed 适配 |
+| [Phase 3](./phase-3/README.md) | 本轮 Chat/Sync/LAN、共同通知权限、本地通知与设备/网络/Distributed 实施、独立复审和验证记录 |
 | [Phase 4](./phase-4/README.md) | 原生文件媒体、拍照/相册、双向分享、WebKit 缓存与交互 |
 | [Phase 5](./phase-5/README.md) | SSE 后台持续接收专项、其余尽力后台与单次终态 |
 | [Phase 6](./phase-6/README.md) | G2 集中验收与用户自签产物 |
 
-Phase 0 已同步 [移动端 UI 规范](../../docs/MOBILE_UI_COMPATIBILITY.md)；minimum 15.0 已写入 `tauri.ios.conf.json`，编译核验仍待 G1。[跨平台开发规范](../../docs/CROSS_PLATFORM_DEVELOPMENT.md) 现规定共享 Vue 中直接使用运行时平台分支，不再要求统一能力状态表或逐层复制功能门禁。
+Phase 0 已同步 [移动端 UI 规范](../../docs/MOBILE_UI_COMPATIBILITY.md)；2026-10-09 用户明确将最低 iOS/iPadOS 提高到 26.0，`tauri.ios.conf.json` 与 Swift package 同步采用该目标，编译核验仍待 G1。原 15.0 是 Phase 0–2 历史基线。[跨平台开发规范](../../docs/CROSS_PLATFORM_DEVELOPMENT.md) 现规定共享 Vue 中直接使用运行时平台分支，不再要求统一能力状态表或逐层复制功能门禁。
 
 ## 研究目标与开发方式
 
@@ -40,7 +40,7 @@ Phase 0 已同步 [移动端 UI 规范](../../docs/MOBILE_UI_COMPATIBILITY.md)�
 
 | 主题 | 当前处理 |
 |---|---|
-| 插件命令 | 自有插件当前 42 条；保留 `R3 / S7 / L15 / X17` 迁移语义索引，不用分类决定当前入口或功能范围 |
+| 插件命令 | 自有插件当前 45 条；原 42 条的 `R3 / S7 / L15 / X17` 分类仅保留历史索引，另列本轮 3 条通知授权/设置命令 |
 | 生命周期 | Swift producer、Rust subscribe 和 bootstrap 已接通；原 Android-only 订阅问题属于已修正的历史发现 |
 | 平台身份 | `src/core/utils/platform.ts` 同步导出 `nativePlatform/isAndroid/isIOS`；已删除 Rust/前端统一能力表与 Swift 能力查询 |
 | 后台专项 | SSE 持续接收是最新重点要求；其余任务尽力后台。静音音频等候选另行研究，不把 API 存在当作效果已满足 |
@@ -58,7 +58,7 @@ Phase 0 已同步 [移动端 UI 规范](../../docs/MOBILE_UI_COMPATIBILITY.md)�
 - SSE 后台持续接收专项，以及 iOS 26+ continued-task 等候选与前台常亮回退；其余任务接受尽力后台，尚无已完成的 iOS 后台 adapter；
 - 独立的 iOS 构建与打包路径，保留 Android arm64 正式链路。
 
-本轮已批准接入 incoming/outgoing share、本 App 系统通知、相机、PhotoKit 保存、网络遥测与 Distributed，并要求适配电量、空间、常亮、缓存和共同权限引导；这些不再列为排除项。系统通知的技术范围另行确定，不自动等同完整 APNs 服务。语音仍未开发但保留说明入口；Root 与 APK 更新保留说明，实际 Android 操作不移植；本地 CLI、视频抽帧等未变更项沿用既定范围。minimum `15.0` 是当前工程输入，新 API 按 availability 分层。批准方向不表示上述原生功能已经完成，也不要求在本轮一起实施。
+最新审批已纳入 incoming/outgoing share、本 App 系统通知、相机、PhotoKit 保存、网络遥测与 Distributed，以及电量、空间、常亮、缓存和共同权限引导。当前 P3 已有通知/设备/工具源码；P4 文件媒体/分享/缓存与 P5 常亮/后台资源仍待实现。系统通知只接本 App 本地通知，不自动等同 APNs。语音、Root/APK 和 Android CLI 的既定边界保持；minimum 26.0 以上新增 API 仍核对 availability，系统授权、资源获得和任务激活仍取真实结果。每项完成度按实际源码和对应证据记录，不从批准范围推定完成。
 
 ### 关键施工任务
 
@@ -69,7 +69,7 @@ Phase 0 已同步 [移动端 UI 规范](../../docs/MOBILE_UI_COMPATIBILITY.md)�
 5. 按依赖完成前台核心、原生附件、键盘、共同权限、分享/通知与设备工具，再闭合后台专项和终态。
 6. 随具体实现更新产品规范、实际所需命令授权和工程输入；当前源码、本地检查与 Apple 结果分别记录。
 
-### 当前 42 条命令结论
+### 原 42 条命令的迁移基线
 
 | 类别 | 数量 | iOS 动作 |
 |---|---:|---|
@@ -79,7 +79,7 @@ Phase 0 已同步 [移动端 UI 规范](../../docs/MOBILE_UI_COMPATIBILITY.md)�
 | `X` | 17 | 当前命令机制属于 Android；iOS 是否保留说明入口按最新审批，不能由此推导统一隐藏 |
 | **合计** | **42** | 文件名中的“41”仅为历史链接兼容；分类是迁移索引，不是运行时能力表 |
 
-详见 [02-平台能力与41条命令兼容矩阵.md](./02-平台能力与41条命令兼容矩阵.md)。产品范围由最新逐项审批与主线 09 决策沿革确定，当前执行情况由实际代码确定。
+Phase 3 另新增 `get_notification_permission`、`request_notification_permission`、`open_notification_settings`，当前公开面共 45 条；不重新编造分类矩阵。详见 [02-平台能力与41条命令兼容矩阵.md](./02-平台能力与41条命令兼容矩阵.md)。产品范围由最新逐项审批与主线 09 决策沿革确定，当前执行情况由实际代码确定。
 
 ### 阅读与完成标准
 
@@ -91,7 +91,7 @@ Phase 0 已同步 [移动端 UI 规范](../../docs/MOBILE_UI_COMPATIBILITY.md)�
 |---|---|
 | [00-研究契约与证据账本.md](./00-研究契约与证据账本.md) | 当前基线、源码推演方法、检查记录与来源 |
 | [01-架构现状与跨平台改造边界.md](./01-架构现状与跨平台改造边界.md) | Rust/Tauri 可复用面、平台 owner 与 cfg 边界 |
-| [02-平台能力与41条命令兼容矩阵.md](./02-平台能力与41条命令兼容矩阵.md) | 42 条命令迁移索引、内部原生面、同步平台身份与 Tauri ACL |
+| [02-平台能力与41条命令兼容矩阵.md](./02-平台能力与41条命令兼容矩阵.md) | 原 42 条迁移索引与新增 3 条通知命令、内部原生面、同步平台身份及实际 ACL |
 | [03-WebKit与iPhone-iPad交互适配.md](./03-WebKit与iPhone-iPad交互适配.md) | WKWebView、键盘、安全区、手势、可访问性 |
 | [04-生命周期后台网络与同步策略.md](./04-生命周期后台网络与同步策略.md) | 生命周期、尽力后台、Chat/Sync、LAN/ATS |
 | [05-文件媒体分享通知与设备能力.md](./05-文件媒体分享通知与设备能力.md) | staging、媒体、分享、通知与设备事实 |

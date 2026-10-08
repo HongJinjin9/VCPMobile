@@ -64,6 +64,7 @@ pub async fn bootstrap(app: &AppHandle) -> Result<(), String> {
         Err(e) => {
             let err_msg = format!("数据库初始化失败: {}", e);
             *lifecycle.last_error.write().await = Some(err_msg.clone());
+            *lifecycle.status_message.write().await = err_msg.clone();
             *lifecycle.status.write().await = CoreStatus::Error;
 
             // 发射致命错误
@@ -107,6 +108,9 @@ pub async fn bootstrap(app: &AppHandle) -> Result<(), String> {
         Ok(s) => s,
         Err(e) => {
             let err_msg = format!("基础配置读取失败: {}", e);
+            *lifecycle.last_error.write().await = Some(err_msg.clone());
+            *lifecycle.status_message.write().await = err_msg.clone();
+            *lifecycle.status.write().await = CoreStatus::Error;
             let _ = handle.emit(
                 "vcp-system-event",
                 serde_json::json!({
@@ -272,6 +276,8 @@ pub async fn bootstrap(app: &AppHandle) -> Result<(), String> {
     }
 
     // 5. 标记为就绪
+    *lifecycle.status_message.write().await = "核心引擎已就绪".to_string();
+    *lifecycle.last_error.write().await = None;
     *lifecycle.status.write().await = CoreStatus::Ready;
 
     // 发射 Ready 信号
@@ -326,6 +332,9 @@ pub async fn bootstrap(app: &AppHandle) -> Result<(), String> {
                                     }
                                 });
                             }
+                        }
+                        NativeEvent::NotificationClick(payload) => {
+                            let _ = event_handle.emit("vcp-notification-click", payload);
                         }
                         NativeEvent::Other {} => {}
                     }

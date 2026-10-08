@@ -8,7 +8,7 @@ import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useSidebarSwipe } from "./core/composables/useSidebarSwipe";
 import { useThemeStore } from "./core/stores/theme";
 import { useAppLifecycleStore } from "./core/stores/appLifecycle";
-import { isAndroid } from "./core/utils/platform";
+import { isAndroid, isIOS } from "./core/utils/platform";
 import { useLayoutStore } from "./core/stores/layout";
 import { useOverlayStore } from "./core/stores/overlay";
 import { useModalHistory } from "./core/composables/useModalHistory";
@@ -253,6 +253,7 @@ const handleShareSelectorClose = () => {
 
 // --- Notification Click Routing State & Logic ---
 type NotificationClickTarget =
+  | { kind: "app" }
   | {
       kind: "cli_job";
       action: "open" | "confirm_stop";
@@ -271,6 +272,7 @@ type NotificationClickTarget =
 const parseNotificationClickTarget = (value: unknown): NotificationClickTarget | null => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const source = value as Record<string, unknown>;
+  if (source.kind === "app") return { kind: "app" };
   if (source.kind === "cli_job") {
     if (
       (source.action !== "open" && source.action !== "confirm_stop") ||
@@ -314,14 +316,39 @@ const parseNotificationClickTarget = (value: unknown): NotificationClickTarget |
 
 let notificationNavigationGeneration = 0;
 let stopNotificationReadyWatch: WatchStopHandle | null = null;
+let appUnmounted = false;
+let lastIOSNotificationSequence = 0;
+let lastIOSNotificationClickId = "";
+const isCurrentNotificationNavigation = (generation: number) =>
+  !appUnmounted && generation === notificationNavigationGeneration;
 
 const routeNotificationClick = (rawDetail: unknown) => {
+  if (appUnmounted) return;
   const detail = parseNotificationClickTarget(rawDetail);
   if (!detail) return;
+  if (isIOS) {
+    const response = rawDetail as Record<string, unknown>;
+    if (typeof response.clickId !== 'string' || !response.clickId || response.clickId.length > 256
+      || typeof response.sequence !== 'number' || !Number.isSafeInteger(response.sequence)
+      || response.sequence <= lastIOSNotificationSequence
+      || response.clickId === lastIOSNotificationClickId) return;
+    // Native assigns order at the actual click. A late cold-start read cannot
+    // supersede a newer live click, and both deliveries of one click are consumed once.
+    lastIOSNotificationSequence = response.sequence;
+    lastIOSNotificationClickId = response.clickId;
+  }
   const generation = ++notificationNavigationGeneration;
   stopNotificationReadyWatch?.();
   stopNotificationReadyWatch = null;
-  void processNotificationClick(detail, generation);
+  // A plain notification opens the app without inventing a chat destination.
+  if (detail.kind === 'app') return;
+  void processNotificationClick(detail, generation).catch(error => {
+    if (!isCurrentNotificationNavigation(generation)) return;
+    console.error('[App] Notification routing failed:', error);
+    notificationStore.addNotification({
+      type: 'error', title: '无法打开通知', message: '请从应用内重新打开目标页面。', toastOnly: true,
+    });
+  });
 };
 
 const handleNotificationClick = (e: Event) => {
@@ -332,7 +359,7 @@ const processNotificationClick = async (
   detail: NotificationClickTarget,
   generation: number,
 ) => {
-  if (generation !== notificationNavigationGeneration) return;
+  if (!isCurrentNotificationNavigation(generation) || detail.kind === 'app') return;
   console.log("[App] Notification click received:", detail);
 
   if (lifecycleStore.state !== "READY") {
@@ -340,10 +367,17 @@ const processNotificationClick = async (
     stopNotificationReadyWatch = watch(
       () => lifecycleStore.state,
       (state) => {
-        if (state === "READY" && generation === notificationNavigationGeneration) {
+        if (state === "READY" && isCurrentNotificationNavigation(generation)) {
           stopNotificationReadyWatch?.();
           stopNotificationReadyWatch = null;
-          void processNotificationClick(detail, generation);
+          void processNotificationClick(detail, generation).catch(error => {
+            if (isCurrentNotificationNavigation(generation)) {
+              console.error('[App] Deferred notification routing failed:', error);
+              notificationStore.addNotification({
+                type: 'error', title: '无法打开通知', message: '请从应用内重新打开目标页面。', toastOnly: true,
+              });
+            }
+          });
         }
       }
     );
@@ -373,10 +407,10 @@ const processNotificationClick = async (
     if (!closeNavigationSurfaces()) return;
     overlayStore.openCliManifest();
     await nextTick();
-    if (generation !== notificationNavigationGeneration) return;
+    if (!isCurrentNotificationNavigation(generation)) return;
     const cliStore = useVcpCliStore();
     const opened = await cliStore.openJobFromNotification(target);
-    if (generation !== notificationNavigationGeneration) return;
+    if (!isCurrentNotificationNavigation(generation)) return;
     if (opened !== "opened") {
       notificationStore.addNotification({
         id: `vcp-cli-notification-stale-${Date.now()}`,
@@ -394,9 +428,9 @@ const processNotificationClick = async (
       message: `将终止该 Job 的整个进程树，已产生的输出会保留。\nJob ${target.jobId.slice(0, 12)}`,
       isDanger: true,
     });
-    if (!confirmed || generation !== notificationNavigationGeneration) return;
+    if (!confirmed || !isCurrentNotificationNavigation(generation)) return;
     const revalidated = await cliStore.openJobFromNotification(target);
-    if (generation !== notificationNavigationGeneration) return;
+    if (!isCurrentNotificationNavigation(generation)) return;
     if (revalidated === "opened") {
       await cliStore.cancelSelectedJob();
     } else {
@@ -418,7 +452,7 @@ const processNotificationClick = async (
       ownerId: detail.ownerId,
       ownerType: detail.ownerType,
     });
-    if (generation !== notificationNavigationGeneration) return;
+    if (!isCurrentNotificationNavigation(generation)) return;
     const targetExists = topics.some((topic) => topic.id === detail.topicId);
     if (!targetExists) {
       notificationStore.addNotification({
@@ -431,13 +465,14 @@ const processNotificationClick = async (
     }
 
     if (!closeNavigationSurfaces()) return;
-    if (generation !== notificationNavigationGeneration) return;
+    if (!isCurrentNotificationNavigation(generation)) return;
     await sessionStore.selectTopicById(
       detail.ownerId,
       detail.ownerType,
       detail.topicId,
     );
   } catch (error) {
+    if (!isCurrentNotificationNavigation(generation)) return;
     console.error("[App] Failed to open notification target:", error);
     notificationStore.addNotification({
       type: "error",
@@ -496,6 +531,7 @@ const backgroundStyle = computed(() => {
 
 // 用于取消监听的清理函数
 let unlistenLog: (() => void) | null = null;
+let stopRouterHistory: (() => void) | null = null;
 
 // --- Root Exit Handler (Double-Tap to Exit with Toast) ---
 let exitTimer: number | null = null;
@@ -555,21 +591,61 @@ const handleExitRequest = async () => {
   }
 };
 
-let pendingNotificationRead = false;
-let appUnmounted = false;
+let pendingNotificationRead: Promise<void> | null = null;
+let pendingNotificationRefreshQueued = false;
+let androidPendingNotificationRead = false;
+let unlistenNativeNotification: (() => void) | null = null;
+let notificationSubscription: Promise<void> | null = null;
+let notificationSubscriptionSettled = isAndroid;
+
+const readPendingNotification = (): Promise<void> => {
+  if (appUnmounted || lifecycleStore.state !== 'READY' || !notificationSubscriptionSettled
+    || (!isAndroid && !isIOS) || (isAndroid && androidPendingNotificationRead)) return Promise.resolve();
+  if (pendingNotificationRead) {
+    if (isIOS) pendingNotificationRefreshQueued = true;
+    return pendingNotificationRead;
+  }
+  if (isAndroid) androidPendingNotificationRead = true;
+  pendingNotificationRead = invoke<unknown>('plugin:vcp-mobile|get_pending_notification')
+    .then(pending => { if (!appUnmounted) routeNotificationClick(pending); })
+    .catch(error => console.warn('[App] Failed to fetch pending notification click:', error))
+    .finally(() => {
+      pendingNotificationRead = null;
+      if (!appUnmounted && pendingNotificationRefreshQueued) {
+        pendingNotificationRefreshQueued = false;
+        void readPendingNotification();
+      }
+    });
+  return pendingNotificationRead;
+};
+
+const subscribeNativeNotifications = (): Promise<void> => {
+  if (appUnmounted || !isIOS) return Promise.resolve();
+  if (notificationSubscription) return notificationSubscription;
+  if (unlistenNativeNotification) return readPendingNotification();
+  notificationSubscription = listen<unknown>('vcp-notification-click', event => {
+    routeNotificationClick(event.payload);
+  }).then(unlisten => {
+    if (appUnmounted) unlisten();
+    else unlistenNativeNotification = unlisten;
+  }).catch(error => {
+    console.warn('[App] Failed to subscribe to native notification clicks:', error);
+  }).then(async () => {
+    notificationSubscriptionSettled = true;
+    await readPendingNotification();
+  }).finally(() => { notificationSubscription = null; });
+  return notificationSubscription;
+};
+
 watch(
   () => lifecycleStore.state,
-  async (state) => {
-    if (!isAndroid || state !== 'READY' || pendingNotificationRead) return;
-    pendingNotificationRead = true;
-    try {
-      const pending = await invoke<unknown>('plugin:vcp-mobile|get_pending_notification');
-      if (!appUnmounted) routeNotificationClick(pending);
-    } catch (error) {
-      console.warn('[App] Failed to fetch pending notification click:', error);
-    }
+  state => {
+    if (state === 'READY') void readPendingNotification();
   },
 );
+watch(() => lifecycleStore.lifecycleSnapshot?.phase, (phase, previous) => {
+  if (isIOS && phase === 'active' && previous !== 'active') void subscribeNativeNotifications();
+});
 
 onMounted(async () => {
   // 1. 同步挂载基础物理按键与系统事件监听 (混合应用黄金铁律：物理拦截最优先挂载，杜绝初始化阻塞失效)
@@ -579,6 +655,7 @@ onMounted(async () => {
     window.addEventListener("vcp-share-intent", handleShareIntent);
     window.addEventListener("vcp-notification-click", handleNotificationClick);
   }
+  if (isIOS) void subscribeNativeNotifications();
   leftSidebarPersistent.addEventListener("change", reconcileDrawerPresentation);
   rightSidebarPersistent.addEventListener("change", reconcileDrawerPresentation);
   reconcileDrawerPresentation();
@@ -588,7 +665,8 @@ onMounted(async () => {
   initGlobalFixer();
 
   // 1.5. 启动 VCP Log IPC 监听 (必须在 bootstrapApp 前挂载，防止 bootstrap 期间的 ready 事件丢失)
-  unlistenLog = await listen<unknown>("vcp-system-event", (event) => {
+  const stopLogListener = await listen<unknown>("vcp-system-event", (event) => {
+    if (appUnmounted) return;
     const payload = event.payload;
     const processed = processPayload(payload);
 
@@ -596,16 +674,23 @@ onMounted(async () => {
       notificationStore.addNotification(processed);
     }
   });
+  if (appUnmounted) {
+    stopLogListener();
+    return;
+  }
+  unlistenLog = stopLogListener;
 
   // 2. 异步执行重度核心资源加载 (启动引导)
   await bootstrapApp();
+  if (appUnmounted) return;
 
   // Operation Dummy Root: Wait for router and inject dummy layer
   await router.isReady();
+  if (appUnmounted) return;
   initRootHistory();
 
   // 路由后置守护：在任何路由切换（包括重定向、刷新）完成后，自动校准防护盾，100% 确保栈顶处于防护状态
-  router.afterEach(() => {
+  stopRouterHistory = router.afterEach(() => {
     initRootHistory();
   });
 
@@ -613,11 +698,14 @@ onMounted(async () => {
 
 onUnmounted(() => {
   appUnmounted = true;
+  notificationNavigationGeneration++;
   stopShareReadyWatch?.();
   stopShareReadyWatch = null;
   stopNotificationReadyWatch?.();
   stopNotificationReadyWatch = null;
   if (unlistenLog) unlistenLog();
+  stopRouterHistory?.();
+  unlistenNativeNotification?.();
   window.removeEventListener("vcp-exit-requested", handleExitRequest);
   window.removeEventListener("vcp-hardware-back", handleExitRequest);
   window.removeEventListener("vcp-share-intent", handleShareIntent);

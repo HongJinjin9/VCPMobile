@@ -10,9 +10,25 @@ pub enum NativeEvent {
     Lifecycle(NativeLifecycleEvent),
     #[serde(rename = "network")]
     Network { connected: bool },
+    #[serde(rename = "notificationClick")]
+    NotificationClick(NativeNotificationClick),
     // Configuration/memory notifications do not describe an app phase.
     #[serde(rename = "configuration", alias = "memory-pressure")]
     Other {},
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeNotificationClick {
+    pub click_id: String,
+    pub sequence: u64,
+    pub kind: NotificationClickKind,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NotificationClickKind {
+    App,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]

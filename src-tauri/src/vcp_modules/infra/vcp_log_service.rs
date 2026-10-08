@@ -1,5 +1,7 @@
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
+use std::collections::VecDeque;
+use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
@@ -12,16 +14,71 @@ use url::Url;
 
 static HEARTBEAT_INTERVAL_MS: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(15000);
+const SOCKET_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_BACKGROUND_LOGS: usize = 256;
+const MAX_BACKGROUND_LOG_BYTES: usize = 2 * 1024 * 1024;
+
+struct LogSizeBudget(usize);
+
+impl Write for LogSizeBudget {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if bytes.len() > self.0 {
+            return Err(std::io::Error::other("background log exceeds cache budget"));
+        }
+        self.0 -= bytes.len();
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+}
+
+#[derive(Default)]
+struct BackgroundLogBuffer {
+    entries: VecDeque<(Value, usize)>,
+    bytes: usize,
+    dropped: usize,
+}
+
+impl BackgroundLogBuffer {
+    fn push(&mut self, payload: Value) {
+        // Count encoded bytes without allocating another copy of a large payload.
+        let mut budget = LogSizeBudget(MAX_BACKGROUND_LOG_BYTES);
+        if serde_json::to_writer(&mut budget, &payload).is_err() {
+            self.dropped = self.dropped.saturating_add(1);
+            return;
+        }
+        let size = MAX_BACKGROUND_LOG_BYTES - budget.0;
+        while self.entries.len() >= MAX_BACKGROUND_LOGS || self.bytes + size > MAX_BACKGROUND_LOG_BYTES {
+            if let Some((_, removed_size)) = self.entries.pop_front() {
+                self.bytes -= removed_size;
+                self.dropped = self.dropped.saturating_add(1);
+            } else {
+                break;
+            }
+        }
+        self.bytes += size;
+        self.entries.push_back((payload, size));
+    }
+}
 
 lazy_static::lazy_static! {
     static ref LOG_CONNECTION_ACTIVE: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
-    static ref LOG_SENDER: Arc<tokio::sync::Mutex<Option<mpsc::UnboundedSender<Value>>>> = Arc::new(tokio::sync::Mutex::new(None));
+    static ref LOG_SENDER: Arc<tokio::sync::Mutex<Option<mpsc::Sender<Value>>>> = Arc::new(tokio::sync::Mutex::new(None));
     // 关键修复：保持 Sender 和一个 Receiver 都在生命周期内，防止通道因无接收者而被视为关闭
-    static ref WS_URL_CHANNEL: (watch::Sender<Option<Url>>, watch::Receiver<Option<Url>>) = watch::channel(None);
+    static ref WS_URL_CHANNEL: (watch::Sender<(u64, Option<Url>)>, watch::Receiver<(u64, Option<Url>)>) = watch::channel((0, None));
     static ref CURRENT_LOG_STATUS: Arc<tokio::sync::RwLock<String>> = Arc::new(tokio::sync::RwLock::new("closed".to_string()));
     static ref HEARTBEAT_RESET_TX: Arc<tokio::sync::Mutex<Option<mpsc::Sender<()>>>> = Arc::new(tokio::sync::Mutex::new(None));
     // 缓存 App 在后台期间接收到的 VCPLog 消息，避免丢弃和 WebView 积压，待返回前台时一并冲刷
-    static ref BACKGROUND_LOG_CACHE: std::sync::Mutex<Vec<serde_json::Value>> = std::sync::Mutex::new(Vec::new());
+    static ref BACKGROUND_LOG_CACHE: std::sync::Mutex<BackgroundLogBuffer> = std::sync::Mutex::new(BackgroundLogBuffer::default());
+}
+
+fn set_log_url(url: Option<Url>) {
+    WS_URL_CHANNEL.0.send_if_modified(|current| {
+        if current.1 == url { return false; }
+        current.0 = current.0.wrapping_add(1);
+        current.1 = url;
+        true
+    });
 }
 
 pub async fn handle_foreground_state_change(_app: &AppHandle, is_foreground: bool) {
@@ -31,7 +88,7 @@ pub async fn handle_foreground_state_change(_app: &AppHandle, is_foreground: boo
     {
         let tx_lock = HEARTBEAT_RESET_TX.lock().await;
         if let Some(tx) = tx_lock.as_ref() {
-            let _ = tx.send(()).await;
+            let _ = tx.try_send(());
         }
     }
 }
@@ -72,15 +129,18 @@ pub fn flush_background_logs<R: tauri::Runtime>(app: &AppHandle<R>) {
         if let Ok(mut cache) = BACKGROUND_LOG_CACHE.lock() {
             std::mem::take(&mut *cache)
         } else {
-            Vec::new()
+            BackgroundLogBuffer::default()
         }
     };
-    if !logs.is_empty() {
+    if logs.dropped > 0 {
+        log::warn!("[VCPLog] Background UI cache discarded {} older/oversized entries", logs.dropped);
+    }
+    if !logs.entries.is_empty() {
         log::info!(
             "[VCPLog] Flashing {} cached background logs to WebView.",
-            logs.len()
+            logs.entries.len()
         );
-        for log in logs {
+        for (log, _) in logs.entries {
             let _ = app.emit("vcp-system-event", log);
         }
     }
@@ -91,7 +151,7 @@ pub async fn set_vcp_log_heartbeat(interval_ms: u64) -> Result<(), String> {
     HEARTBEAT_INTERVAL_MS.store(interval_ms, Ordering::SeqCst);
     let tx_lock = HEARTBEAT_RESET_TX.lock().await;
     if let Some(tx) = tx_lock.as_ref() {
-        let _ = tx.send(()).await;
+        let _ = tx.try_send(());
     }
     Ok(())
 }
@@ -102,10 +162,13 @@ pub async fn get_vcp_log_status_internal() -> String {
 
 #[tauri::command]
 pub async fn send_vcp_log_message(payload: serde_json::Value) -> Result<(), String> {
+    if CURRENT_LOG_STATUS.read().await.as_str() != "connected" {
+        return Err("VCPLog connection is not active".to_string());
+    }
     let sender_lock = LOG_SENDER.lock().await;
     if let Some(sender) = sender_lock.as_ref() {
         sender
-            .send(payload)
+            .try_send(payload)
             .map_err(|e| format!("Failed to send message to VCPLog: {}", e))?;
         Ok(())
     } else {
@@ -161,16 +224,21 @@ pub async fn init_vcp_log_connection_internal<R: tauri::Runtime>(
     url: String,
     key: String,
 ) -> Result<(), String> {
+    #[cfg(target_os = "ios")]
+    if !crate::vcp_modules::lifecycle_manager::is_app_in_foreground(&app) {
+        set_log_url(None);
+        return Ok(());
+    }
     // 如果 URL 或 Key 为空，发送 None 以停止现有连接并进入静默等待
     if url.trim().is_empty() || key.trim().is_empty() {
-        let _ = WS_URL_CHANNEL.0.send(None);
+        set_log_url(None);
         return Ok(());
     }
 
     let ws_url = parse_log_url(&url, &key)?;
 
     // Always send the new URL to the watch channel
-    let _ = WS_URL_CHANNEL.0.send(Some(ws_url.clone()));
+    set_log_url(Some(ws_url));
 
     if LOG_CONNECTION_ACTIVE.swap(true, Ordering::SeqCst) {
         return Ok(());
@@ -187,23 +255,15 @@ pub async fn init_vcp_log_connection_internal<R: tauri::Runtime>(
 async fn start_vcp_log_listener<R: tauri::Runtime>(app_handle: AppHandle<R>) {
     let mut url_rx = WS_URL_CHANNEL.0.subscribe();
 
-    // 创建 mpsc 通道用于回传消息
-    let (tx, mut rx) = mpsc::unbounded_channel::<Value>();
-
-    // 将发送端存储在全局静态变量中供 send_vcp_log_message 使用
-    {
-        let mut sender_lock = LOG_SENDER.lock().await;
-        *sender_lock = Some(tx);
-    }
-
     let mut retry_delay = Duration::from_millis(1000);
     loop {
         // 获取当前 URL
-        let ws_url = {
+        let (connection_revision, ws_url) = {
             let val = url_rx.borrow().clone();
             match val {
-                Some(u) => u,
-                None => {
+                (revision, Some(url)) => (revision, url),
+                (_, None) => {
+                    *CURRENT_LOG_STATUS.write().await = "closed".to_string();
                     if url_rx.changed().await.is_err() {
                         break;
                     }
@@ -299,6 +359,7 @@ async fn start_vcp_log_listener<R: tauri::Runtime>(app_handle: AppHandle<R>) {
             let connect_fut = connect_async(request);
 
             tokio::select! {
+                biased;
                 _ = url_rx.changed() => {
                     log::info!("[VCPLog] URL changed during connection trial, aborting.");
                     interrupted_by_url_change = true;
@@ -363,7 +424,12 @@ async fn start_vcp_log_listener<R: tauri::Runtime>(app_handle: AppHandle<R>) {
 
         if connection_succeeded {
             if let Some(ws_stream) = ws_stream_opt {
+                if url_rx.borrow().0 != connection_revision { continue; }
                 retry_delay = Duration::from_millis(1000);
+                // Outbound messages belong to this socket, not the persistent
+                // reconnect loop. Dropping it also drops unsent old-config data.
+                let (tx, mut rx) = mpsc::channel::<Value>(64);
+                *LOG_SENDER.lock().await = Some(tx);
                 {
                     *CURRENT_LOG_STATUS.write().await = "connected".to_string();
                 }
@@ -406,20 +472,17 @@ async fn start_vcp_log_listener<R: tauri::Runtime>(app_handle: AppHandle<R>) {
                 let initial_ms = HEARTBEAT_INTERVAL_MS.load(Ordering::SeqCst);
                 let mut heartbeat_timer = Box::pin(sleep(Duration::from_millis(initial_ms)));
 
+                let mut configuration_changed = false;
                 loop {
                     tokio::select! {
+                        biased;
                         // 监听 URL 变更并防止 Flapping 瞬断
-                        _ = url_rx.changed() => {
-                            let new_val = url_rx.borrow().clone();
-                            if let Some(new_u) = new_val {
-                                if new_u != ws_url {
-                                    log::info!("[VCPLog] URL changed, closing current connection.");
-                                    break;
-                                } else {
-                                    log::info!("[VCPLog] URL changed event fired but value is identical. Ignoring to prevent flapping.");
-                                }
-                            } else {
-                                log::info!("[VCPLog] URL cleared, closing connection.");
+                        changed = url_rx.changed() => {
+                            if changed.is_err() || url_rx.borrow().0 != connection_revision {
+                                // A fast stop/resume of the same URL is still a
+                                // new connection intent even if watch coalesces it.
+                                log::info!("[VCPLog] Connection intent changed, closing socket.");
+                                configuration_changed = true;
                                 break;
                             }
                         }
@@ -431,7 +494,9 @@ async fn start_vcp_log_listener<R: tauri::Runtime>(app_handle: AppHandle<R>) {
                         }
                         // 心跳周期触发
                         _ = &mut heartbeat_timer => {
-                            if let Err(e) = ws_write.send(Message::Ping(vec![].into())).await {
+                            if let Err(e) = tokio::time::timeout(SOCKET_WRITE_TIMEOUT, ws_write.send(Message::Ping(vec![].into())))
+                                .await.map_err(|_| "WebSocket ping timed out".to_string())
+                                .and_then(|result| result.map_err(|error| error.to_string())) {
                                 log::error!("[VCPLog] Failed to send Ping: {}", e);
                                 break;
                             }
@@ -471,7 +536,9 @@ async fn start_vcp_log_listener<R: tauri::Runtime>(app_handle: AppHandle<R>) {
                         payload_opt = rx.recv() => {
                             if let Some(payload) = payload_opt {
                                 if let Ok(text) = serde_json::to_string(&payload) {
-                                    if let Err(e) = ws_write.send(Message::Text(text.into())).await {
+                                    if let Err(e) = tokio::time::timeout(SOCKET_WRITE_TIMEOUT, ws_write.send(Message::Text(text.into())))
+                                        .await.map_err(|_| "WebSocket send timed out".to_string())
+                                        .and_then(|result| result.map_err(|error| error.to_string())) {
                                         log::error!("[VCPLog] Failed to send message: {}", e);
                                         break;
                                     }
@@ -482,6 +549,7 @@ async fn start_vcp_log_listener<R: tauri::Runtime>(app_handle: AppHandle<R>) {
                 }
 
                 {
+                    *LOG_SENDER.lock().await = None;
                     let mut tx_lock = HEARTBEAT_RESET_TX.lock().await;
                     *tx_lock = None;
                 }
@@ -499,6 +567,9 @@ async fn start_vcp_log_listener<R: tauri::Runtime>(app_handle: AppHandle<R>) {
                         "source": "VCPLog"
                     }),
                 );
+                if configuration_changed {
+                    continue;
+                }
             }
         } else {
             {
@@ -552,4 +623,39 @@ async fn start_vcp_log_listener<R: tauri::Runtime>(app_handle: AppHandle<R>) {
     }
     LOG_CONNECTION_ACTIVE.store(false, Ordering::SeqCst);
     log::info!("[VCPLog] Listener task terminated, connection flag and sender reset.");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn background_log_cache_discards_old_entries_and_rejects_an_oversized_payload() {
+        let mut cache = BackgroundLogBuffer::default();
+        for index in 0..MAX_BACKGROUND_LOGS + 3 {
+            cache.push(serde_json::json!({ "index": index }));
+        }
+        assert_eq!(cache.entries.front().map(|(value, _)| value["index"].as_u64()), Some(Some(3)));
+        assert_eq!(cache.entries.len(), MAX_BACKGROUND_LOGS);
+        let old_bytes = cache.bytes;
+        cache.push(serde_json::json!({ "data": "x".repeat(MAX_BACKGROUND_LOG_BYTES) }));
+        assert_eq!(cache.bytes, old_bytes);
+        assert_eq!(cache.dropped, 4);
+
+        let drained = std::mem::take(&mut cache);
+        assert_eq!(drained.entries.len(), MAX_BACKGROUND_LOGS);
+        assert!(cache.entries.is_empty());
+        assert_eq!(cache.bytes, 0);
+    }
+
+    #[test]
+    fn background_log_byte_budget_eviction_is_independent_of_entry_count() {
+        let mut cache = BackgroundLogBuffer::default();
+        let payload = serde_json::json!({ "data": "x".repeat(MAX_BACKGROUND_LOG_BYTES / 2) });
+        cache.push(payload.clone());
+        cache.push(payload);
+        assert_eq!(cache.entries.len(), 1);
+        assert!(cache.bytes <= MAX_BACKGROUND_LOG_BYTES);
+        assert_eq!(cache.dropped, 1);
+    }
 }

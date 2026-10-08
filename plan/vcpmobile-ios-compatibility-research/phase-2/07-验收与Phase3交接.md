@@ -10,7 +10,7 @@
 - 平台身份改用 OS 插件同步信息；全局能力表/Swift 查询/前端 Store 和通用 Rust 能力门禁已删除。获批的通知、设备与 Distributed 原生实现交 Phase 3。
 - Scene/App phase、NWPath Channel、Rust native sequence/epoch 和 Vue 恢复消费贯通。iOS 初始相位未知时不提前恢复，保留 inactive 与 background 的区别。
 - 唯一原生注册独立等待真实结果、保留一个底层 receiver；外层取消不丢接收，真实失败由 live/snapshot 重放，新 WebView 可获知。
-- iOS 15.0、单 Scene、隐私和图标仍有可重放输入；G1 直接执行正常工具链，集中 resolution/shim 已删除。
+- 单 Scene、隐私和图标仍有可重放输入；minimum 已按用户后续 D4 改为 iOS/iPadOS 26.0，本阶段旧 15.0 为历史输入。G1 直接执行正常工具链，集中 resolution/shim 已删除。
 - 官方 tao 0.37.1 替代旧 vendor；app `ios_window` 接入单窗口恢复，不重复建立 Rust 核心或原生 Channel。
 
 入口与资源覆盖见 [01](./01-生产入口覆盖记录.md)，实现细节见 02–06。源码完成不代表已有可安装或可签名的 iOS 产物。
@@ -67,7 +67,7 @@ G1 提供 Swift/Objective-C 类型与 ABI、iOS Rust 编译、实际链接/配�
 | 平台身份与权限 UI | OS 插件同步身份；Gate 共用外壳，当前 iOS 尚无实际权限项目 | Phase 3 接入真实权限检查/请求/拒绝/返回刷新，不恢复能力查询或虚构 Android 同名权限 |
 | 通知、设备与 Distributed | 通知 producer 和设备 adapter 未实现；Distributed 可浏览/保存配置但尚不运行 | 按 Phase 3 P3-3 至 P3-5 接通实际结果、部分数据缺失、通知点击和节点清理；Root/CLI 无法迁移时逐工具说明 |
 | 文件媒体与双向分享 | HTML 子路径、现有 CAS 及共享选择器 owner 可复用，原生获取/分享未接入 | Phase 4 接拍照/相册保存/Files/预览导出/双向分享/缓存；Extension 与自签输入交 Phase 6 |
-| 工程 | iOS 15.0、受控单 Scene 与 G1 | 保存实际 Apple 诊断；G2 集成打包仍在 Phase 6 |
+| 工程 | 现行 iOS/iPadOS 26.0、受控单 Scene 与 G1；原 15.0 只保留在历史证据 | 保存实际 Apple 诊断；G2 集成打包仍在 Phase 6 |
 
 平台身份不表示已获系统授权，前端 bootstrap 不再查询能力。首个真实 phase、系统权限、任务终态仍各由实际 owner 决定；后台 SSE 的严格目标和空音频候选归 Phase 5，不能把“尽力后台”文案当作该目标完成。
 

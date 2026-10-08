@@ -10,7 +10,7 @@ impl StreamingTool for NetworkInfoTool {
     fn manifest(&self) -> ToolManifest {
         ToolManifest {
             name: "MobileNetworkInfo".to_string(),
-            description: "检测当前连接网络介质（WIFI/蜂窝）、局域网 IP、延迟及当前吞吐速度。"
+            description: "读取网络介质、活动接口地址及系统可得字段；iOS 网络路径状态不表示服务器可达，未提供的速率明确说明。"
                 .to_string(),
             display_name: "网络带宽监控".to_string(),
             placeholder: Some("{{MobileNetwork}}".to_string()),

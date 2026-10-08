@@ -47,7 +47,7 @@ Phase 0 的 `--check` 是历史源码快照核对，本阶段生产源码已变�
 
 | 后续任务 | 已确定的输入/owner | 不得遗漏 |
 |---|---|---|
-| Swift Package/binding/注册 | Phase 2 已有真实 iOS handle、minimum 15.0、可重放工程输入与正常 SwiftPM 解析 | 按当前 Tauri 2.12.1/tao 0.37.1 取得 G1 编译/链接，旧 host 结果不替代 |
+| Swift Package/binding/注册 | Phase 2 已有真实 iOS handle、可重放工程输入与正常 SwiftPM 解析；minimum 已按后续 D4 改为 26.0，原 15.0 属历史 | 按当前 Tauri 2.12.1/tao 0.37.1 取得 G1 编译/链接，旧 host 结果不替代 |
 | 平台身份 | `src/core/utils/platform.ts` 同步读取 plugin-os | 旧 `infra/platform.rs`/Store/types/query 已删除；Vue 直接平台分支，真实权限/任务状态仍归实际 owner |
 | 生命周期接入 | Swift producer/subscribe/bootstrap 与 Vue 已接通 | 保留 sequence/epoch、首次真实 active、R3 告知和旧响应丢弃，不重复建立另一条观察链 |
 | 迟到原生完成 | 事件注册独立 receiver 与一个在途槽位 | 保留最终回调接收；能力查询槽位已撤除，不因历史设计重新引入 |

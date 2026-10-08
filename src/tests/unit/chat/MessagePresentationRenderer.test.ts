@@ -115,6 +115,7 @@ async function seedRemountTail(
     topicUpdatedAt: null,
   };
   await streamStore.processStreamEvent({
+    consumerRevision: 1,
     ...eventBase,
     type: 'thinking',
     messageId,
@@ -127,6 +128,7 @@ async function seedRemountTail(
     const chunk = String.fromCharCode(96 + frameSeq);
     fullContent += chunk;
     await streamStore.processStreamEvent({
+      consumerRevision: 1,
       ...eventBase,
       type: 'aurora',
       messageId,
@@ -887,6 +889,7 @@ describe('MessageRenderer presentation shell', () => {
       topicUpdatedAt: null,
     };
     await streamStore.processStreamEvent({
+      consumerRevision: 1,
       ...eventBase,
       type: 'thinking',
       messageId: 'remount-message',
@@ -899,6 +902,7 @@ describe('MessageRenderer presentation shell', () => {
       const chunk = String.fromCharCode(96 + frameSeq);
       fullContent += chunk;
       await streamStore.processStreamEvent({
+        consumerRevision: 1,
         ...eventBase,
         type: 'aurora',
         messageId: 'remount-message',
@@ -1211,6 +1215,7 @@ describe('MessageRenderer presentation shell', () => {
       topicUpdatedAt: null,
     };
     await streamStore.processStreamEvent({
+      consumerRevision: 1,
       ...eventBase,
       type: 'thinking',
       messageId: 'html-tail-message',
@@ -1218,6 +1223,7 @@ describe('MessageRenderer presentation shell', () => {
       aurora: null,
     });
     await streamStore.processStreamEvent({
+      consumerRevision: 1,
       ...eventBase,
       type: 'aurora',
       messageId: 'html-tail-message',
@@ -1318,6 +1324,7 @@ describe('MessageRenderer presentation shell', () => {
     };
 
     await streamStore.processStreamEvent({
+      consumerRevision: 1,
       ...eventBase,
       type: 'thinking',
       messageId: 'thought-tail-message',
@@ -1326,6 +1333,7 @@ describe('MessageRenderer presentation shell', () => {
       aurora: null,
     });
     await streamStore.processStreamEvent({
+      consumerRevision: 1,
       ...eventBase,
       type: 'aurora',
       messageId: 'thought-tail-message',
@@ -1402,6 +1410,7 @@ describe('MessageRenderer presentation shell', () => {
     expect(wrapper.find('.custom-spin').exists()).toBe(false);
 
     await streamStore.processStreamEvent({
+      consumerRevision: 1,
       ...eventBase,
       type: 'aurora',
       messageId: 'thought-tail-message',
@@ -1436,6 +1445,7 @@ describe('MessageRenderer presentation shell', () => {
     expect(wrapper.get('.vcp-thought-block .vcp-ast-sandbox').element).toBe(tailSandbox);
 
     await streamStore.processStreamEvent({
+      consumerRevision: 1,
       ...eventBase,
       type: 'aurora',
       messageId: 'thought-tail-message',
@@ -1506,6 +1516,7 @@ describe('MessageRenderer presentation shell', () => {
     };
 
     await streamStore.processStreamEvent({
+      consumerRevision: 1,
       ...eventBase,
       type: 'thinking',
       messageId: 'thought-plain-message',
@@ -1515,6 +1526,7 @@ describe('MessageRenderer presentation shell', () => {
     });
 
     await streamStore.processStreamEvent({
+      consumerRevision: 1,
       ...eventBase,
       type: 'aurora',
       messageId: 'thought-plain-message',
@@ -1565,6 +1577,7 @@ describe('MessageRenderer presentation shell', () => {
     const appendDataSpy = vi.spyOn(CharacterData.prototype, 'appendData');
 
     await streamStore.processStreamEvent({
+      consumerRevision: 1,
       ...eventBase,
       type: 'aurora',
       messageId: 'thought-plain-message',
@@ -1594,6 +1607,7 @@ describe('MessageRenderer presentation shell', () => {
     appendDataSpy.mockRestore();
 
     await streamStore.processStreamEvent({
+      consumerRevision: 1,
       ...eventBase,
       type: 'aurora',
       messageId: 'thought-plain-message',

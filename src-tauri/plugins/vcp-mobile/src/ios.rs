@@ -14,6 +14,33 @@ use std::{
 #[cfg(target_os = "ios")]
 use tauri::{AppHandle, Manager, Runtime};
 
+/// Synchronous mobile calls keep Tauri's native receiver on this stack until the
+/// final response. Call only on an async-command or blocking worker, never UIKit.
+#[cfg(target_os = "ios")]
+pub(crate) fn run<R: Runtime, T: serde::de::DeserializeOwned>(
+    app: AppHandle<R>,
+    operation: &str,
+    args: serde_json::Value,
+) -> Result<T, String> {
+    app.state::<crate::VcpMobileState<R>>()
+        .mobile_plugin_handle()?
+        .run_mobile_plugin(operation, args)
+        .map_err(|error| format!("native_bridge: {operation}: {error}"))
+}
+
+/// Asynchronous frontend requests wait outside Tokio's network workers. Once
+/// started, this blocking task retains the native receiver even if its caller leaves.
+#[cfg(target_os = "ios")]
+pub(crate) async fn run_async<R: Runtime, T: serde::de::DeserializeOwned + Send + 'static>(
+    app: AppHandle<R>,
+    operation: &'static str,
+    args: serde_json::Value,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(move || run(app, operation, args))
+        .await
+        .map_err(|error| format!("native_worker: {operation}: {error}"))?
+}
+
 #[cfg(target_os = "ios")]
 fn validate_protocol(version: u32) -> Result<(), String> {
     if version != 1 {

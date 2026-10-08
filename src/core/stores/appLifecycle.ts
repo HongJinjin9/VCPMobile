@@ -9,7 +9,8 @@ import { useChatSessionStore } from './chatSessionStore';
 import { useChatHistoryStore } from './chatHistoryStore';
 import { useTopicStore } from './topicListManager';
 import { useAvatarStore } from './avatar';
-import { isAndroid } from '../utils/platform';
+import { isAndroid, isIOS } from '../utils/platform';
+import { readNotificationPermission } from '../../features/notification/nativeNotifications';
 import { selectLatestLifecycleSnapshot, type LifecycleSnapshotDto } from '../types/lifecycle';
 import type {
   ListenerPermissionDto,
@@ -44,6 +45,7 @@ interface SystemSnapshotDto {
 
 
 const CONNECT_TIMEOUT_MS = 15000;
+const NOTIFICATION_INTRO_KEY = 'vcp_ios_notification_intro_v1';
 
 export const useAppLifecycleStore = defineStore('appLifecycle', () => {
   const state = ref<AppState>('BOOTING');
@@ -70,6 +72,16 @@ export const useAppLifecycleStore = defineStore('appLifecycle', () => {
   let bootstrapPromise: Promise<void> | null = null;
   let coreReadyUnlisten: (() => void) | null = null;
   let connectTimeoutId: ReturnType<typeof setTimeout> | null = null;
+  let optionalNotificationIntroDismissed = false;
+
+  const hasSeenNotificationIntroduction = () => {
+    if (optionalNotificationIntroDismissed) return true;
+    try {
+      return localStorage.getItem(NOTIFICATION_INTRO_KEY) === 'seen';
+    } catch {
+      return false;
+    }
+  };
 
   const statusText = computed(() => {
     switch (state.value) {
@@ -347,8 +359,8 @@ export const useAppLifecycleStore = defineStore('appLifecycle', () => {
         errorMsg.value = null;
         hasBootstrapped.value = false;
 
-        // 当前已接入的启动权限项目来自 Android 原生接口；缺失时进入共享引导页。
-        // iOS 尚无已接入的启动权限项目，直接继续，不借用 Android 查询或容量门槛。
+        // Android keeps its existing required keepalive setup. iOS notification
+        // authorization is optional and is requested only by the user's action.
         if (isAndroid) {
           try {
             const pStatus = await invoke<PermissionStatusDto>('plugin:vcp-mobile|check_all_permissions');
@@ -373,6 +385,21 @@ export const useAppLifecycleStore = defineStore('appLifecycle', () => {
               type: 'warning',
               duration: 0,
             });
+          }
+        }
+
+        if (isIOS && !hasSeenNotificationIntroduction()) {
+          try {
+            const permission = await readNotificationPermission();
+            if (permission.authorization === 'notDetermined') {
+              setState('PERMISSIONS', '介绍可选的系统通知');
+              bootstrapPromise = null;
+              isBootstrapping.value = false;
+              return;
+            }
+          } catch (cause) {
+            // An optional permission query must not prevent entering the app.
+            console.warn('[Lifecycle] Optional notification permission unavailable:', cause);
           }
         }
 
@@ -401,6 +428,19 @@ export const useAppLifecycleStore = defineStore('appLifecycle', () => {
     return bootstrapPromise;
   };
 
+  const continueFromPermissionGuide = () => {
+    if (isIOS) {
+      optionalNotificationIntroDismissed = true;
+      try {
+        // This records only that the explanation was seen, never OS authorization.
+        localStorage.setItem(NOTIFICATION_INTRO_KEY, 'seen');
+      } catch (cause) {
+        console.warn('[Lifecycle] Could not remember notification introduction:', cause);
+      }
+    }
+    return bootstrap(true);
+  };
+
   return {
     state,
     errorMsg,
@@ -414,6 +454,7 @@ export const useAppLifecycleStore = defineStore('appLifecycle', () => {
     applyLifecycleSnapshot,
     coreStatus: computed(() => notificationStore.vcpCoreStatus),
     bootstrap,
+    continueFromPermissionGuide,
     hydrateSystemStatus
   };
 });

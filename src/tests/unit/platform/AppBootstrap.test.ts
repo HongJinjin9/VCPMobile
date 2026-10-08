@@ -49,6 +49,7 @@ describe('platform-aware bootstrap', () => {
 
   beforeEach(() => {
     testPlatform.value = null;
+    localStorage.clear();
     pinia = createPinia();
     setActivePinia(pinia);
     backgroundServiceFailures = [];
@@ -129,15 +130,43 @@ describe('platform-aware bootstrap', () => {
     expect(newStore.historyList[0].id).toBe('vcp_background_service_error_events');
   });
 
-  it('does not run Android permission checks or add Android warnings on iOS', async () => {
+  it.each(['denied', 'authorized', 'provisional', 'unknown'])('does not block iOS chat when notification permission is %s', async authorization => {
     testPlatform.value = 'ios';
+    mockInvoke('plugin:vcp-mobile|get_notification_permission', () => ({ authorization }));
     const lifecycle = useAppLifecycleStore();
 
     await lifecycle.bootstrap();
 
     expect(lifecycle.state).toBe('READY');
     expect(invokeMock).toHaveBeenCalledWith('get_system_snapshot');
-    expect(invokeMock.mock.calls.some(([command]) => command.startsWith('plugin:vcp-mobile|'))).toBe(false);
+    expect(invokeMock.mock.calls.filter(([command]) => command.startsWith('plugin:vcp-mobile|')).map(([command]) => command))
+      .toEqual(['plugin:vcp-mobile|get_notification_permission']);
+    expect(useNotificationStore().historyList).toHaveLength(0);
+  });
+
+  it('lets an iOS user skip the first optional introduction without faking OS authorization or showing it again', async () => {
+    testPlatform.value = 'ios';
+    mockInvoke('plugin:vcp-mobile|get_notification_permission', () => ({ authorization: 'notDetermined' }));
+    const lifecycle = useAppLifecycleStore();
+    await lifecycle.bootstrap();
+    expect(lifecycle.state).toBe('PERMISSIONS');
+    await lifecycle.continueFromPermissionGuide();
+    expect(lifecycle.state).toBe('READY');
+    expect(invokeMock).not.toHaveBeenCalledWith('plugin:vcp-mobile|request_notification_permission');
+
+    disposePinia(pinia);
+    pinia = createPinia();
+    setActivePinia(pinia);
+    await useAppLifecycleStore().bootstrap();
+    expect(useAppLifecycleStore().state).toBe('READY');
+    expect(invokeMock.mock.calls.filter(([command]) => command === 'plugin:vcp-mobile|get_notification_permission')).toHaveLength(1);
+  });
+
+  it('continues iOS startup if an optional permission query fails', async () => {
+    testPlatform.value = 'ios';
+    mockInvoke('plugin:vcp-mobile|get_notification_permission', () => Promise.reject(new Error('native unavailable')));
+    await useAppLifecycleStore().bootstrap();
+    expect(useAppLifecycleStore().state).toBe('READY');
     expect(useNotificationStore().historyList).toHaveLength(0);
   });
 
