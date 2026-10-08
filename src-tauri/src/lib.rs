@@ -123,26 +123,33 @@ pub fn run() {
         .build(context)
         .expect("error while building tauri application");
 
-    app.run(|_app_handle, event| match event {
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
-        tauri::RunEvent::WindowEvent {
-            event: tauri::WindowEvent::Focused(focused),
-            ..
-        } => {
-            log::info!(
-                "[Lifecycle] Native WindowEvent::Focused: focused={}",
-                focused
-            );
-            let handle = _app_handle.clone();
-            let epoch = vcp_modules::lifecycle_manager::reserve_lifecycle_transition();
-            tauri::async_runtime::spawn(async move {
-                vcp_modules::lifecycle_manager::set_app_foreground_state_for_epoch(
-                    handle, focused, epoch,
-                )
-                .await;
-            });
+    app.run(|_app_handle, event| {
+        #[cfg(target_os = "ios")]
+        if let Err(error) = vcp_modules::infra::ios_window::handle_run_event(_app_handle, &event) {
+            log::error!("[iOSWindow] {}", error);
         }
-        _ => {}
+
+        match event {
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            tauri::RunEvent::WindowEvent {
+                event: tauri::WindowEvent::Focused(focused),
+                ..
+            } => {
+                log::info!(
+                    "[Lifecycle] Native WindowEvent::Focused: focused={}",
+                    focused
+                );
+                let handle = _app_handle.clone();
+                let epoch = vcp_modules::lifecycle_manager::reserve_lifecycle_transition();
+                tauri::async_runtime::spawn(async move {
+                    vcp_modules::lifecycle_manager::set_app_foreground_state_for_epoch(
+                        handle, focused, epoch,
+                    )
+                    .await;
+                });
+            }
+            _ => {}
+        }
     });
 }
 

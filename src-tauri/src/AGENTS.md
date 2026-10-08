@@ -57,6 +57,8 @@ src-tauri/src/
 
 需要在 bootstrap 前即可调用的纯内存状态必须先于异步引导注册。依赖数据库、文件或外部连接的状态按其实际初始化阶段建立；不得用默认成功对象掩盖尚未完成的资源初始化。
 
+`infra/ios_window.rs` 在 iOS RunEvent 回调中同步处理隐式退出与单主窗口恢复。它以 UIKit 唯一 connected Scene 的身份/role、Tauri 现有 `main` WebView 和 builder 的创建前同名注册检查为依据，复用原 `main` 配置并核对实际 Window session；不维护窗口镜像状态，不重跑 Rust bootstrap。绑定异常仅报告，不循环销毁重建。此处不承担运行中 Chat 输出接入新 WebView 的恢复职责。
+
 ### 3.2 领域 owner
 
 - `vcp_modules/<domain>/` 持有对应业务状态、输入校验、生命周期和副作用。

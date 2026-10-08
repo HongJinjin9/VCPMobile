@@ -6207,6 +6207,8 @@ dependencies = [
  "markup5ever_rcdom",
  "memmap2",
  "mime_guess",
+ "objc2",
+ "objc2-ui-kit",
  "pdf_oxide",
  "percent-encoding",
  "pulldown-cmark",

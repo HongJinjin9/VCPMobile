@@ -27,8 +27,8 @@ Rust 核心内部调用 ─> Rust 公开入口 ─┼─> PluginHandle / JNI
 | 路径 | 职责 |
 | ---- | ---- |
 | `src/lib.rs` | 组合插件、注册前端可调用命令、注入 `VcpMobileState` |
-| `src/events.rs` | Rust 原生 Channel 订阅、生命周期/网络事件类型、后台服务失败通知与有界待取快照 |
-| `src/ios.rs` | 两条内部 Swift 调用的 DTO、协议校验与有界 receiver 保活；调用方超时/取消不丢原生接收端 |
+| `src/events.rs` | Rust 原生 Channel 订阅、生命周期/网络事件类型、后台服务失败通知与快照收集；真实 Events 注册失败保留至进程结束，Guardian/Helper 取走 |
+| `src/ios.rs` | 两条内部 Swift 调用的 DTO、协议校验与有界 receiver 保活；能力查询等待 5 秒，事件注册等待最终 ack，调用方超时/取消不丢原生接收端 |
 | `ios/Package.swift`、`ios/Sources/VcpMobilePlugin.swift` | Swift product/初始化符号、主队列 app/Scene 观察与 NWPathMonitor；不拥有业务状态 |
 | `src/screen.rs` | 经 WebView JNI 进入 `ScreenKeepOnArbiter` |
 | `src/stream.rs` | 请求独立的前台保活租约与 helper service 的 Rust 边界 |
@@ -69,6 +69,8 @@ Rust 边界变化在 `src-tauri/` 运行 `cargo check --locked -p tauri-plugin-v
 
 Swift 接入时同步核对 `ios_path`、SwiftPM product、初始化 binding、selector、DTO、Channel 与资源归属；UI 操作显式在主队列执行，领域状态仍归 Rust。Apple 编译/链接按根规范集中在手动 Actions G1/G2，日常源码审计记录具体目标分支与待办。
 
-当前 iOS 只在 Rust bootstrap 安装一次长期 Channel；Swift WebView 替换复用同一 Channel 并更换观察者 generation。锁定 Tauri 的原生 Channel 注册表没有删除入口，不能通过反复创建 Channel 实现重试。两条短原生请求分别最多一个在途；超时后底层任务仍接收最终回调，能力查询可在其完成后重试，真正订阅失败需重新启动 App。
+当前 iOS 只在 Rust bootstrap 安装一次长期 Channel；Swift WebView 替换复用同一 Channel 并更换观察者 generation。锁定 Tauri 的原生 Channel 注册表没有删除入口，不能通过反复创建 Channel 实现重试。两条原生请求分别最多一个在途；能力查询调用方最多等待 5 秒，超时后底层任务仍接收最终回调，完成后可以重试查询。事件注册由 READY 后的独立订阅任务等待最终 ack，迟到 reject、解析或协议错误仍报告真实失败，不阻塞核心启动。
+
+两平台真实 Events 注册失败没有进程内重试入口，由 `ServiceFailureNotices` 留存并经 `collect_service_failure_notices` 重放给新 WebView；Guardian/Helper 仍按原语义取走。当前 WebView 的一次告知由前端通知 Store 管理。真正订阅失败需完全关闭应用后重新打开；未来增加注册恢复成功路径时，必须同步调整故障留存期限。
 
 **完成**：实际消费者、Rust 边界、Kotlin 所有者、平台声明及返回通道保持一致，并分别说明已取得的 host、Android 构建或设备证据。

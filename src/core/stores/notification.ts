@@ -13,6 +13,7 @@ export interface VcpNotification {
   silent?: boolean;
   toastOnly?: boolean; // 仅作为 Toast 悬浮显示，不进入通知中心历史
   historyOnly?: boolean; // 仅进入通知中心历史，不弹出 Toast
+  oncePerWebview?: boolean; // 固定 ID 在当前 WebView 中仅接受一次，不随历史清除而重置
   read?: boolean;
   rawPayload?: any; // 用于保存原始数据，方便处理 action
 }
@@ -50,9 +51,16 @@ export const useNotificationStore = defineStore('notification', () => {
   };
 
   const toastTimers = new Set<ReturnType<typeof setTimeout>>();
+  const acceptedOnceIds = new Set<string>();
 
   const addNotification = (payload: Partial<VcpNotification>) => {
     if (payload.silent) return;
+
+    // 告知记忆属于当前 Store，不依赖 Toast、历史留存或用户是否已读。
+    if (payload.oncePerWebview && payload.id) {
+      if (acceptedOnceIds.has(payload.id)) return;
+      acceptedOnceIds.add(payload.id);
+    }
 
     // --- 单例抑制逻辑 (P0 级别优化) ---
     // 如果提供了固定 ID (如 vcp_sync_connection_status)，则尝试查找并更新现有 Toast

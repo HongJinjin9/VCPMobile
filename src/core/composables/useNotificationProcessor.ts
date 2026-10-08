@@ -134,7 +134,7 @@ export function useNotificationProcessor() {
 
     // 原生后台能力异常沿全局通知通道展示；保留至用户关闭，避免后台或启动期间过期。
     if (payload.type === 'vcp-background-service-error') {
-      let notification: Pick<VcpNotification, 'title' | 'message' | 'type'>;
+      let notification: Pick<VcpNotification, 'title' | 'message' | 'type' | 'oncePerWebview'>;
       switch (payload.service) {
         case 'guardian':
           notification = {
@@ -152,9 +152,10 @@ export function useNotificationProcessor() {
           break;
         case 'events':
           notification = {
-            title: '后台状态监听异常',
-            message: '无法可靠接收应用前后台状态变化，后台保活可能受影响。请保持应用在前台使用。',
+            title: '应用状态监听异常',
+            message: '应用状态监听未能完成初始化，前后台状态处理与连接恢复可能受影响。请完全关闭应用后重新打开。',
             type: 'warning',
+            oncePerWebview: true,
           };
           break;
         default:

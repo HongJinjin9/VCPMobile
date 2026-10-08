@@ -293,6 +293,7 @@ pub async fn bootstrap(app: &AppHandle) -> Result<(), String> {
     crate::vcp_modules::boot_trace::boot_mark(&handle, "rs:core_ready");
 
     // 原生 Channel 在状态 owner 就绪后安装；订阅时回放当前状态，补齐冷启动期间的变化。
+    // 独立任务等待真实注册结果，不阻塞 bootstrap，也不将原生响应延迟视为失败。
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let handle_net = handle.clone();
@@ -388,7 +389,8 @@ pub async fn get_system_snapshot(
         sync,
         lifecycle: state.lifecycle_snapshot.read().await.map(|value| value.as_snapshot()),
         database_recovery,
-        background_service_failures: tauri_plugin_vcp_mobile::events::take_service_failures(&app),
+        background_service_failures:
+            tauri_plugin_vcp_mobile::events::collect_service_failure_notices(&app),
     })
 }
 

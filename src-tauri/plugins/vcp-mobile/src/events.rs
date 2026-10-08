@@ -73,10 +73,22 @@ pub enum ServiceFailure {
     Events,
 }
 
-/// Bounded to the three capability failures. A snapshot drains failures that
-/// occurred before the UI listener existed or while its WebView was suspended.
+/// Bounded to the three capability failures. Event registration has no retry in
+/// this process, so its failure must remain visible to replacement WebViews.
 #[derive(Default)]
-pub(crate) struct PendingServiceFailures(Mutex<BTreeSet<ServiceFailure>>);
+pub(crate) struct ServiceFailureNotices(Mutex<BTreeSet<ServiceFailure>>);
+
+impl ServiceFailureNotices {
+    fn collect(&self) -> Vec<ServiceFailure> {
+        let Ok(mut failures) = self.0.lock() else {
+            return Vec::new();
+        };
+        let notices = failures.iter().copied().collect();
+        // Guardian/helper keep their existing one-shot snapshot semantics.
+        failures.retain(|failure| *failure == ServiceFailure::Events);
+        notices
+    }
+}
 
 pub fn report_service_failure<R: Runtime>(app: &AppHandle<R>, service: &str, error: &str) {
     log::warn!("[VcpMobilePlugin] {service} failed: {error}");
@@ -86,8 +98,8 @@ pub fn report_service_failure<R: Runtime>(app: &AppHandle<R>, service: &str, err
         "events" => ServiceFailure::Events,
         _ => return,
     };
-    if let Some(pending) = app.try_state::<PendingServiceFailures>() {
-        if let Ok(mut failures) = pending.0.lock() {
+    if let Some(notices) = app.try_state::<ServiceFailureNotices>() {
+        if let Ok(mut failures) = notices.0.lock() {
             failures.insert(failure);
         }
     }
@@ -97,19 +109,42 @@ pub fn report_service_failure<R: Runtime>(app: &AppHandle<R>, service: &str, err
     );
 }
 
-pub fn take_service_failures<R: Runtime>(app: &AppHandle<R>) -> Vec<ServiceFailure> {
-    let Some(pending) = app.try_state::<PendingServiceFailures>() else {
+pub fn collect_service_failure_notices<R: Runtime>(app: &AppHandle<R>) -> Vec<ServiceFailure> {
+    let Some(notices) = app.try_state::<ServiceFailureNotices>() else {
         return Vec::new();
     };
-    let Ok(mut failures) = pending.0.lock() else {
-        return Vec::new();
-    };
-    std::mem::take(&mut *failures).into_iter().collect()
+    notices.collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn snapshots_replay_events_but_consume_guardian_and_helper_notices() {
+        let notices = ServiceFailureNotices::default();
+        assert!(notices.collect().is_empty());
+        notices.0.lock().unwrap().extend([
+            ServiceFailure::Guardian,
+            ServiceFailure::Helper,
+            ServiceFailure::Events,
+        ]);
+        assert_eq!(
+            notices.collect(),
+            vec![
+                ServiceFailure::Guardian,
+                ServiceFailure::Helper,
+                ServiceFailure::Events,
+            ]
+        );
+        assert_eq!(notices.collect(), vec![ServiceFailure::Events]);
+        notices.0.lock().unwrap().insert(ServiceFailure::Helper);
+        assert_eq!(
+            notices.collect(),
+            vec![ServiceFailure::Helper, ServiceFailure::Events]
+        );
+        assert_eq!(notices.collect(), vec![ServiceFailure::Events]);
+    }
 
     #[test]
     fn decodes_native_channel_snapshots_and_ignores_non_transition_events() {
@@ -135,10 +170,7 @@ mod tests {
             "event": "configuration", "payload": { "isDarkMode": true }
         }))
         .unwrap();
-        assert!(matches!(
-            configuration,
-            NativeEvent::Other {}
-        ));
+        assert!(matches!(configuration, NativeEvent::Other {}));
         assert!(serde_json::from_value::<NativeEvent>(serde_json::json!({
             "event": "network", "payload": { "connected": "true" }
         }))

@@ -93,7 +93,6 @@ impl Drop for CallSlot {
 async fn receive_native<T, F>(
     busy: Arc<AtomicBool>,
     operation: &'static str,
-    deadline: Duration,
     response: F,
 ) -> Result<T, String>
 where
@@ -107,16 +106,15 @@ where
         let _slot = slot;
         response.await
     });
-    // Timeout drops only the JoinHandle. Tokio detaches the task, retaining the
-    // actual mobile receiver until Swift resolves/rejects once and releases it.
-    tokio::time::timeout(deadline, receiver)
+    // Cancelling this wait drops only the JoinHandle. Tokio detaches the task,
+    // retaining the mobile receiver until Swift resolves/rejects and releases it.
+    receiver
         .await
-        .map_err(|_| format!("native_timeout: {operation} did not respond within the deadline"))?
         .map_err(|error| format!("native_bridge: {operation}: {error}"))?
 }
 
 #[cfg(target_os = "ios")]
-const RESPONSE_DEADLINE: Duration = Duration::from_secs(5);
+const CAPABILITIES_RESPONSE_DEADLINE: Duration = Duration::from_secs(5);
 
 #[cfg(target_os = "ios")]
 pub async fn get_native_capabilities<R: Runtime>(
@@ -125,11 +123,9 @@ pub async fn get_native_capabilities<R: Runtime>(
     let state = app.state::<crate::VcpMobileState<R>>();
     let handle = state.mobile_plugin_handle()?;
     let busy = state.ios_calls.capabilities.clone();
-    let capabilities = receive_native(
-        busy,
-        "getNativeCapabilities",
-        RESPONSE_DEADLINE,
-        async move {
+    let capabilities = tokio::time::timeout(
+        CAPABILITIES_RESPONSE_DEADLINE,
+        receive_native(busy, "getNativeCapabilities", async move {
             handle
                 .run_mobile_plugin_async::<NativeCapabilities>(
                     "getNativeCapabilities",
@@ -137,9 +133,12 @@ pub async fn get_native_capabilities<R: Runtime>(
                 )
                 .await
                 .map_err(|error| error.to_string())
-        },
+        }),
     )
-    .await?;
+    .await
+    .map_err(|_| {
+        "native_timeout: getNativeCapabilities did not respond within the deadline".to_string()
+    })??;
     capabilities.validate()?;
     Ok(capabilities)
 }
@@ -157,20 +156,17 @@ pub(crate) async fn register_native_events<R: Runtime>(
     let state = app.state::<crate::VcpMobileState<R>>();
     let handle = state.mobile_plugin_handle()?;
     let busy = state.ios_calls.events.clone();
-    let registration = receive_native(
-        busy,
-        "registerNativeEvents",
-        RESPONSE_DEADLINE,
-        async move {
-            handle
-                .run_mobile_plugin_async::<Registration>(
-                    "registerNativeEvents",
-                    serde_json::json!({ "channel": channel }),
-                )
-                .await
-                .map_err(|error| error.to_string())
-        },
-    )
+    // The bootstrap subscription task consumes the final acknowledgement, even
+    // when the native queue takes longer than a capability query may wait.
+    let registration = receive_native(busy, "registerNativeEvents", async move {
+        handle
+            .run_mobile_plugin_async::<Registration>(
+                "registerNativeEvents",
+                serde_json::json!({ "channel": channel }),
+            )
+            .await
+            .map_err(|error| error.to_string())
+    })
     .await?;
     validate_protocol(registration.protocol_version)
 }
@@ -217,18 +213,18 @@ mod tests {
         let busy = Arc::new(AtomicBool::new(false));
         let (sender, response) = oneshot::channel::<u32>();
         let (finished, completion) = oneshot::channel();
-        let result = receive_native(busy.clone(), "test", Duration::ZERO, async move {
-            let value = response.await.map_err(|error| error.to_string())?;
-            let _ = finished.send(());
-            Ok(value)
-        })
+        let result = tokio::time::timeout(
+            Duration::ZERO,
+            receive_native(busy.clone(), "test", async move {
+                let value = response.await.map_err(|error| error.to_string())?;
+                let _ = finished.send(());
+                Ok(value)
+            }),
+        )
         .await;
-        assert!(result.unwrap_err().starts_with("native_timeout:"));
+        assert!(result.is_err());
         assert!(busy.load(Ordering::Acquire));
-        let rejected = receive_native(busy.clone(), "test", Duration::from_secs(1), async {
-            Ok(0_u32)
-        })
-        .await;
+        let rejected = receive_native(busy.clone(), "test", async { Ok(0_u32) }).await;
         assert!(rejected.unwrap_err().starts_with("native_busy:"));
         // Models Tauri's send(response).unwrap(): a dropped receiver would fail.
         sender.send(7).unwrap();
@@ -238,7 +234,7 @@ mod tests {
             .unwrap();
         wait_until_idle(&busy).await;
         assert_eq!(
-            receive_native(busy, "test", Duration::from_secs(1), async { Ok(8_u32) })
+            receive_native(busy, "test", async { Ok(8_u32) })
                 .await
                 .unwrap(),
             8
@@ -253,7 +249,7 @@ mod tests {
         let (finished, completion) = oneshot::channel();
         let caller_busy = busy.clone();
         let caller = tokio::spawn(async move {
-            receive_native(caller_busy, "test", Duration::from_secs(5), async move {
+            receive_native(caller_busy, "test", async move {
                 let _ = started.send(());
                 let value = response.await.map_err(|error| error.to_string())?;
                 let _ = finished.send(());
@@ -274,5 +270,31 @@ mod tests {
             .unwrap()
             .unwrap();
         wait_until_idle(&busy).await;
+    }
+
+    #[tokio::test]
+    async fn retained_wait_delivers_the_final_native_success_or_failure() {
+        for outcome in [Ok(7_u32), Err("native_events: rejected".to_string())] {
+            let busy = Arc::new(AtomicBool::new(false));
+            let (sender, response) = oneshot::channel();
+            let caller = receive_native(busy.clone(), "test", async move {
+                response.await.map_err(|error| error.to_string())?
+            });
+            tokio::pin!(caller);
+
+            // Borrow the wait so this observation does not cancel its owner.
+            assert!(tokio::time::timeout(Duration::from_millis(10), &mut caller)
+                .await
+                .is_err());
+            assert!(busy.load(Ordering::Acquire));
+            sender.send(outcome.clone()).unwrap();
+            assert_eq!(
+                tokio::time::timeout(Duration::from_secs(1), caller)
+                    .await
+                    .unwrap(),
+                outcome
+            );
+            assert!(!busy.load(Ordering::Acquire));
+        }
     }
 }

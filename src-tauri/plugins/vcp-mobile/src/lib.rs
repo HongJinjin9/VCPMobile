@@ -95,7 +95,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             system::release_ota_keepalive,
         ])
         .setup(|app, _api| {
-            app.manage(events::PendingServiceFailures::default());
+            app.manage(events::ServiceFailureNotices::default());
             #[cfg(target_os = "android")]
             let plugin_handle =
                 _api.register_android_plugin("com.vcp.mobile", "VcpMobilePlugin")?;

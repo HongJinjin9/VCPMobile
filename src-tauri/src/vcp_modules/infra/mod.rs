@@ -5,6 +5,8 @@ pub mod file_manager;
 pub mod high_speed_channel;
 pub mod html2md;
 pub mod http_clients;
+#[cfg(target_os = "ios")]
+pub mod ios_window;
 pub mod lifecycle_controller;
 pub mod lifecycle_manager;
 pub mod lifecycle_reconciler;

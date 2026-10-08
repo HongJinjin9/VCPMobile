@@ -3,6 +3,7 @@ import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia';
 import { useAppLifecycleStore } from '../../../core/stores/appLifecycle';
 import { useNotificationStore } from '../../../core/stores/notification';
 import { usePlatformStore } from '../../../core/stores/platform';
+import { useNotificationProcessor } from '../../../core/composables/useNotificationProcessor';
 import { platformFixture } from '../../fixtures/platform';
 import { invokeMock, mockInvoke } from '../../mocks/tauri';
 
@@ -39,10 +40,12 @@ vi.mock('../../../core/utils/bootTrace', () => ({
 
 describe('platform-aware bootstrap', () => {
   let pinia: Pinia;
+  let backgroundServiceFailures: Array<'guardian' | 'helper' | 'events'>;
 
   beforeEach(() => {
     pinia = createPinia();
     setActivePinia(pinia);
+    backgroundServiceFailures = [];
     mockInvoke('get_system_snapshot', () => ({
       lifecycle: null,
       core: 'ready',
@@ -50,11 +53,75 @@ describe('platform-aware bootstrap', () => {
       log: 'connected',
       sync: 'disconnected',
       databaseRecovery: null,
-      backgroundServiceFailures: [],
+      backgroundServiceFailures,
     }));
   });
 
-  afterEach(() => disposePinia(pinia));
+  afterEach(() => {
+    disposePinia(pinia);
+    vi.useRealTimers();
+  });
+
+  it.each(['realtime', 'snapshot'])('accepts a retained events failure once when %s arrives first', async first => {
+    vi.useFakeTimers();
+    backgroundServiceFailures = ['events'];
+    const lifecycle = useAppLifecycleStore();
+    const store = useNotificationStore();
+    const { processPayload } = useNotificationProcessor();
+    const deliverRealtime = () => store.addNotification(processPayload({
+      type: 'vcp-background-service-error', service: 'events',
+    }));
+
+    if (first === 'realtime') deliverRealtime();
+    else await lifecycle.hydrateSystemStatus();
+    const firstTimestamp = store.historyList[0].timestamp;
+
+    vi.advanceTimersByTime(60_000);
+    if (first === 'realtime') await lifecycle.hydrateSystemStatus();
+    else deliverRealtime();
+
+    expect(store.historyList).toHaveLength(1);
+    expect(store.activeToasts).toHaveLength(1);
+    expect(store.unreadCount).toBe(1);
+    expect(store.historyList[0].timestamp).toBe(firstTimestamp);
+    expect(store.activeToasts[0].timestamp).toBe(firstTimestamp);
+  });
+
+  it('does not restore a cleared events notice when the same WebView hydrates again', async () => {
+    vi.useFakeTimers();
+    backgroundServiceFailures = ['events'];
+    const lifecycle = useAppLifecycleStore();
+    const store = useNotificationStore();
+    await lifecycle.hydrateSystemStatus();
+    store.activeToasts = [];
+    store.clearHistory();
+
+    vi.advanceTimersByTime(60_000);
+    await lifecycle.hydrateSystemStatus();
+
+    expect(store.historyList).toHaveLength(0);
+    expect(store.activeToasts).toHaveLength(0);
+    expect(store.unreadCount).toBe(0);
+  });
+
+  it('replays the retained events failure into a new WebView Pinia', async () => {
+    backgroundServiceFailures = ['events'];
+    await useAppLifecycleStore().hydrateSystemStatus();
+    const oldStore = useNotificationStore();
+    expect(oldStore.historyList).toHaveLength(1);
+
+    disposePinia(pinia);
+    pinia = createPinia();
+    setActivePinia(pinia);
+    await useAppLifecycleStore().hydrateSystemStatus();
+    const newStore = useNotificationStore();
+
+    expect(newStore).not.toBe(oldStore);
+    expect(newStore.historyList).toHaveLength(1);
+    expect(newStore.activeToasts).toHaveLength(1);
+    expect(newStore.unreadCount).toBe(1);
+    expect(newStore.historyList[0].id).toBe('vcp_background_service_error_events');
+  });
 
   it('stops before native permissions on capability failure and retries the same bootstrap owner', async () => {
     mockInvoke('get_platform_capabilities', async () => { throw new Error('bridge unavailable'); });
