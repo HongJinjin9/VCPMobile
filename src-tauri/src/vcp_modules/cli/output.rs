@@ -827,8 +827,10 @@ mod tests {
         assert!(hash_output_artifact_pair(directory.path(), &stdout, &stderr, 99, 6).is_err());
     }
 
+    // GC syncs the changed Unix directory; the read-only budget check below is portable.
+    #[cfg(unix)]
     #[test]
-    fn orphan_gc_is_scoped_and_workspace_budget_is_enforced() {
+    fn orphan_gc_preserves_referenced_outputs() {
         let output = tempfile::tempdir().expect("temporary output root");
         let kept = output.path().join("kept.stdout");
         let orphan = output.path().join("orphan.stderr");
@@ -841,7 +843,10 @@ mod tests {
         );
         assert!(kept.exists());
         assert!(!orphan.exists());
+    }
 
+    #[test]
+    fn workspace_budget_is_enforced() {
         let workspace = tempfile::tempdir().expect("temporary workspace");
         std::fs::write(workspace.path().join("data"), vec![0_u8; 9]).expect("write workspace data");
         assert_eq!(

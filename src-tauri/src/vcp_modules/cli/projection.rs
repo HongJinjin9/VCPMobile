@@ -121,7 +121,8 @@ fn is_artifact_file_name(value: &str) -> bool {
         && Path::new(value).file_name().and_then(|name| name.to_str()) == Some(value)
 }
 
-#[cfg(test)]
+// Cleanup commits directory changes with Unix directory sync.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

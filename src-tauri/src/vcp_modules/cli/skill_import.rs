@@ -1234,11 +1234,16 @@ fn truncate_owned(value: &str, max_bytes: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use super::super::skill_catalog::{ensure_skill_catalog, read_skill_v2};
+    use super::super::skills::SkillErrorKind;
     use super::*;
+    #[cfg(unix)]
     use zip::write::SimpleFileOptions;
+    #[cfg(unix)]
     use zip::ZipWriter;
 
+    #[cfg(unix)]
     fn write_zip(path: &Path, entries: &[(&str, &[u8], u32)]) {
         let file = File::create(path).expect("create ZIP");
         let mut zip = ZipWriter::new(file);
@@ -1255,6 +1260,7 @@ mod tests {
         zip.finish().expect("finish ZIP");
     }
 
+    #[cfg(unix)]
     fn write_zip_with_symlink(path: &Path) {
         let file = File::create(path).expect("create symlink ZIP");
         let mut zip = ZipWriter::new(file);
@@ -1275,6 +1281,7 @@ mod tests {
         zip.finish().expect("finish symlink ZIP");
     }
 
+    #[cfg(unix)]
     fn picked(path: &Path, name: &str) -> PickedSkillImportFile {
         let bytes = fs::read(path).expect("read ZIP");
         PickedSkillImportFile {
@@ -1286,6 +1293,8 @@ mod tests {
         }
     }
 
+    // Secure archive IO uses O_NOFOLLOW; catalog commits also require Unix directory sync.
+    #[cfg(unix)]
     #[test]
     fn inspect_commit_and_replay_are_generation_fenced() {
         let directory = tempfile::tempdir().expect("temporary root");
@@ -1336,6 +1345,7 @@ mod tests {
         assert!(text.contains("# Sample Skill"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn commit_rejects_stale_catalog_generation_without_replacing_existing_state() {
         let directory = tempfile::tempdir().expect("temporary root");
@@ -1382,6 +1392,7 @@ mod tests {
             4,
         )
         .expect("commit second");
+        let committed_catalog = load_catalog(&skills).expect("read committed catalog");
         let error = commit_skill_import(
             &skills,
             &CommitSkillImportRequest {
@@ -1393,12 +1404,44 @@ mod tests {
             5,
         )
         .expect_err("stale generation must fail");
-        assert!(error.message.contains("generation changed"));
+        assert_eq!(error.kind, SkillErrorKind::Integrity);
+        assert_eq!(
+            load_catalog(&skills).expect("read catalog after rejected commit"),
+            committed_catalog
+        );
     }
 
     #[test]
-    fn traversal_and_symlink_entries_fail_before_catalog_mutation() {
+    fn archive_paths_reject_escape_components() {
+        assert_eq!(
+            validate_archive_path("skill/SKILL.md").expect("relative resource path"),
+            Path::new("skill").join("SKILL.md")
+        );
+        for path in [
+            "../SKILL.md",
+            "skill/../../SKILL.md",
+            "/SKILL.md",
+            "skill\\SKILL.md",
+        ] {
+            let error = validate_archive_path(path).expect_err("unsafe path must fail");
+            assert_eq!(error.kind, SkillErrorKind::Integrity, "{path}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn archive_audit_accepts_regular_files_and_rejects_traversal_and_symlinks() {
         let directory = tempfile::tempdir().expect("temporary root");
+        let regular = directory.path().join("regular.zip");
+        write_zip(&regular, &[("SKILL.md", b"# Safe\n", 0o100644)]);
+        audit_archive(
+            &regular,
+            "regular.zip",
+            &picked(&regular, "regular.zip").hash,
+            1,
+        )
+        .expect("valid archive must reach and pass the audit");
+
         let traversal = directory.path().join("traversal.zip");
         write_zip(&traversal, &[("../SKILL.md", b"# Escape\n", 0o100644)]);
         let error = audit_archive(
@@ -1408,7 +1451,7 @@ mod tests {
             1,
         )
         .expect_err("traversal must fail");
-        assert!(error.message.contains("traversal"));
+        assert_eq!(error.kind, SkillErrorKind::Integrity);
 
         let symlink = directory.path().join("symlink.zip");
         write_zip_with_symlink(&symlink);
@@ -1419,6 +1462,6 @@ mod tests {
             1,
         )
         .expect_err("symlink must fail");
-        assert!(error.message.contains("symlink or special"));
+        assert_eq!(error.kind, SkillErrorKind::Integrity);
     }
 }

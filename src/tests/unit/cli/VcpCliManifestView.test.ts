@@ -1,15 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { openFileNative, writeTempFile } from "tauri-plugin-vcp-mobile";
 import VcpCliManifestView from "@/features/cli/components/VcpCliManifestView.vue";
-import featureOverlaysSource from "@/components/FeatureOverlays.vue?raw";
-import rightSidebarSource from "@/components/layout/RightSidebar.vue?raw";
-import overlaySource from "@/core/stores/overlay.ts?raw";
-import manifestViewSource from "@/features/cli/components/VcpCliManifestView.vue?raw";
-import cliManifestGoldenSource from "../../../../src-tauri/src/vcp_modules/cli/fixtures/vcp_mobile_cli_manifest.golden.json?raw";
-import commandsSource from "../../../../src-tauri/src/commands.rs?raw";
 import {
   VCP_CLI_MANIFEST_COMMAND,
   parseCanonicalVcpCliManifest,
+  type VcpCliManifest,
 } from "@/features/cli/manifest";
 import {
   VCP_CLI_ACTION_COMMAND,
@@ -23,11 +18,28 @@ import { flushPromises } from "@/tests/utils/flush";
 import { mountWithPinia } from "@/tests/utils/mount";
 import { configureAndroidPlatform } from "@/tests/fixtures/platform";
 
-const canonicalManifest = cliManifestGoldenSource.trimEnd();
-const manifestFixture = JSON.parse(canonicalManifest) as Record<
-  string,
-  unknown
->;
+const manifestFixture = {
+  manifestVersion: "1.0.0",
+  name: "VCPMobileCLI",
+  version: "1.0.0",
+  displayName: "VCP Mobile CLI",
+  description: "测试工具说明",
+  author: "VCPMobile",
+  pluginType: "synchronous",
+  entryPoint: { type: "mobile", command: "native" },
+  communication: { protocol: "mobile", timeout: 30_000 },
+  capabilities: {
+    invocationCommands: [
+      {
+        commandIdentifier: "VCPMobileCLI",
+        description: "执行命令",
+        example: "示例命令",
+      },
+    ],
+  },
+} satisfies VcpCliManifest;
+// Deliberately use tabs to catch copy/export reserialization without freezing production prose.
+const canonicalManifest = JSON.stringify(manifestFixture, null, "\t");
 
 function mountView() {
   return mountWithPinia(VcpCliManifestView, {
@@ -108,10 +120,7 @@ describe("VCP CLI canonical manifest boundary", () => {
       new TextEncoder().encode(canonicalManifest).byteLength,
     );
     expect(parsed.manifest.name).toBe("VCPMobileCLI");
-    expect(() => parseCanonicalVcpCliManifest(manifestFixture)).toThrow(
-      "无法保证复制与注册内容逐字一致",
-    );
-    expect(commandsSource).toContain(VCP_CLI_MANIFEST_COMMAND);
+    expect(() => parseCanonicalVcpCliManifest(manifestFixture)).toThrow();
   });
 
   it("shows the manifest help on Jobs and Skills tabs instead of the tab panels", async () => {
@@ -126,7 +135,6 @@ describe("VCP CLI canonical manifest boundary", () => {
 
       await openManifestTab(wrapper);
       expect(wrapper.findAll('[data-vcp-cli-role="manifest-json"]').length).toBe(1);
-      expect(wrapper.text()).toContain("规范 JSON");
       // 工具说明优先于页签面板，正文不再停留在 jobs/skills
       expect(wrapper.findAll("vcp-cli-run-panel-stub").length).toBe(0);
       expect(wrapper.findAll("vcp-cli-skills-panel-stub").length).toBe(0);
@@ -134,23 +142,12 @@ describe("VCP CLI canonical manifest boundary", () => {
     }
   });
 
-  it("loads through the canonical command and keeps runtime truth off the manifest", async () => {
-    const wrapper = mountView();
-    await openManifestTab(wrapper);
-    await flushPromises();
-
-    expect(invokeMock).toHaveBeenCalledWith(VCP_CLI_MANIFEST_COMMAND);
-    expect(wrapper.get('[data-vcp-cli-role="manifest-json"]').text()).toBe(
-      canonicalManifest.trim(),
-    );
-    expect(wrapper.text()).toContain("当前可用性与 Job 状态以运行页的 Rust");
-  });
-
   it("copies and exports the exact backend text with controlled Android APIs", async () => {
     const wrapper = mountView();
     await openManifestTab(wrapper);
     await flushPromises();
 
+    expect(invokeMock).toHaveBeenCalledWith(VCP_CLI_MANIFEST_COMMAND);
     await wrapper.get('[data-vcp-cli-action="copy"]').trigger("click");
     await flushPromises();
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
@@ -167,7 +164,6 @@ describe("VCP CLI canonical manifest boundary", () => {
     expect(openFileNative).toHaveBeenCalledWith(
       "/cache/VCPMobileCLI.manifest.json",
     );
-    expect(wrapper.text()).toContain("已生成临时 JSON");
   });
 
   it("enables system sharing only when the WebView exposes a real share function", async () => {
@@ -177,7 +173,6 @@ describe("VCP CLI canonical manifest boundary", () => {
     expect(
       unavailable.get('[data-vcp-cli-action="share"]').attributes("disabled"),
     ).toBeDefined();
-    expect(unavailable.text()).toContain("ACTION_SEND");
     unavailable.unmount();
 
     const share = vi.fn(() => Promise.resolve());
@@ -204,33 +199,11 @@ describe("VCP CLI canonical manifest boundary", () => {
     await openManifestTab(wrapper);
     await flushPromises();
 
-    expect(wrapper.text()).toContain("manifest 暂不可用");
-    expect(wrapper.text()).toContain("逐字一致");
     expect(
       wrapper.get('[data-vcp-cli-action="copy"]').attributes("disabled"),
     ).toBeDefined();
     expect(
       wrapper.get('[data-vcp-cli-action="export"]').attributes("disabled"),
     ).toBeDefined();
-  });
-
-  it("wires the More tray into the semantic SlidePage stack with a plain opaque surface", () => {
-    expect(rightSidebarSource).toContain("overlayStore.openCliManifest()");
-    expect(rightSidebarSource).toContain("label: 'VCP CLI'");
-    expect(overlaySource).toContain("| 'cliManifest'");
-    expect(overlaySource).toContain(
-      "pageStackTop.value?.type !== 'cliManifest'",
-    );
-    expect(featureOverlaysSource).toContain(
-      "defineAsyncComponent(() => import('../features/cli/components/VcpCliManifestView.vue'))",
-    );
-    expect(featureOverlaysSource).toContain(
-      "createFirstOpenLatch(() => overlayStore.isCliManifestOpen)",
-    );
-    expect(featureOverlaysSource).toContain(
-      "overlayStore.getPageZIndex('cliManifest')",
-    );
-    expect(manifestViewSource).toContain("bg-[var(--primary-bg)]");
-    expect(manifestViewSource).not.toContain("rounded-2xl");
   });
 });

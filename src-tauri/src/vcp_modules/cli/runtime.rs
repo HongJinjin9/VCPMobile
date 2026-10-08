@@ -2616,6 +2616,8 @@ mod tests {
         assert!(!job_visible_to(&other, None));
     }
 
+    // These commit-boundary tests require the production Unix directory-sync semantics.
+    #[cfg(unix)]
     #[tokio::test]
     async fn explicit_cancel_binding_and_intent_share_one_durable_commit() {
         let directory = tempfile::tempdir().expect("temporary ledger directory");
@@ -2660,6 +2662,7 @@ mod tests {
         }));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn concurrent_cancel_operation_id_cannot_bind_two_jobs() {
         let directory = tempfile::tempdir().expect("temporary ledger directory");
@@ -2732,6 +2735,7 @@ mod tests {
         assert_eq!(bound_jobs, 1);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn expired_attempt_persists_timeout_intent_before_process_observation() {
         let directory = tempfile::tempdir().expect("temporary ledger directory");

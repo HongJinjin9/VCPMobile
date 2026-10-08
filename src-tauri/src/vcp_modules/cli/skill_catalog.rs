@@ -915,7 +915,8 @@ pub(super) fn normalized_relative_path(path: &Path) -> Result<String, SkillError
     Ok(output)
 }
 
-#[cfg(test)]
+// Catalog publication depends on Unix directory sync and read-only object permissions.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
@@ -985,7 +986,6 @@ mod tests {
         assert_eq!(canonical, BUILTIN_SKILL);
     }
 
-    #[cfg(unix)]
     #[test]
     fn catalog_rejects_symlinked_object_resource() {
         let directory = tempfile::tempdir().expect("temporary Skills root");
